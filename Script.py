@@ -370,53 +370,36 @@ def scrape_schedule(year=None):
 def create_calendar(games):
     """Create an iCalendar file from the scraped games"""
     cal = Calendar()
-    valid_games = 0
-    skipped_games = 0
+    
+    # Update the PRODID to use raw.githubusercontent.com for direct file access
+    cal._prodid = "Yale Football Schedule - https://raw.githubusercontent.com/LordOfTheTrees/YaleFootballSchedule/main/yale_football.ics"
     
     for game in games:
-        # Verify that we have all required data before creating an event
-        if (game['opponent'] and game['opponent'] != "Unknown Opponent" and
-            'start' in game and game['start']):
-            
-            event = Event()
-            event.name = game['title']
-            event.begin = game['start']
-            event.end = game['end']
-            
-            if game['location']:
-                event.location = game['location']
-            
-            # Add broadcast info to description
-            description = ""
-            if game['broadcast']:
-                description += f"Broadcast on: {game['broadcast']}\n"
-            
-            # Add home/away info
-            if game['is_home']:
-                description += "Home Game"
-            else:
-                description += "Away Game"
-                
-            event.description = description
-            cal.events.add(event)
-            valid_games += 1
-            logger.info(f"Added event to calendar: {game['title']} on {game['start']}")
+        event = Event()
+        event.name = game['title']
+        event.begin = game['start']
+        event.end = game['end']
+        event.location = game['location']
+        
+        # Add broadcast info to description
+        description = ""
+        if game['broadcast']:
+            description += f"Broadcast on: {game['broadcast']}\n"
+        
+        # Add home/away info
+        if game['is_home']:
+            description += "Home Game"
         else:
-            # Log games that were skipped due to missing data
-            skipped_games += 1
-            missing = []
-            if not game['opponent'] or game['opponent'] == "Unknown Opponent":
-                missing.append("opponent")
-            if not game.get('start'):
-                missing.append("date/time")
+            description += "Away Game"
             
-            logger.warning(f"Skipped game due to missing {', '.join(missing)}: {game.get('title', 'Unknown')}")
+        event.description = description
+        cal.events.add(event)
     
-    # Save to file using the serialize() method instead of str()
+    # Save to file
     with open(CALENDAR_FILE, 'w') as f:
-        f.write(cal.serialize())
+        f.write(str(cal))
     
-    logger.info(f"Calendar created with {valid_games} events (skipped {skipped_games} incomplete entries)")
+    logger.info(f"Calendar created with {len(games)} events")
     return cal
 
 def update_calendar(custom_season_url=None):
@@ -434,6 +417,14 @@ def serve_calendar():
     try:
         with open(CALENDAR_FILE, 'r') as f:
             cal_content = f.read()
+        
+        # Add raw GitHub URL to the PRODID field if not already present
+        if "PRODID:" in cal_content and "raw.githubusercontent.com" not in cal_content:
+            cal_content = cal_content.replace(
+                "PRODID:ics.py - http://git.io/lLljaA",
+                "PRODID:Yale Football Schedule - https://raw.githubusercontent.com/LordOfTheTrees/YaleFootballSchedule/main/yale_football.ics"
+            )
+        
         return Response(cal_content, mimetype='text/calendar')
     except Exception as e:
         logger.error(f"Error serving calendar: {str(e)}")
@@ -442,9 +433,6 @@ def serve_calendar():
 @app.route('/')
 def index():
     """Simple landing page"""
-    # Get current season for display
-    current_season = get_current_season()
-    
     return """
     <html>
         <head>
@@ -484,12 +472,6 @@ def index():
                     font-size: 0.8em;
                     color: #777;
                 }
-                .season-selector {
-                    margin-top: 20px;
-                    padding: 10px;
-                    background-color: #f0f0f0;
-                    border-radius: 5px;
-                }
             </style>
         </head>
         <body>
@@ -497,24 +479,14 @@ def index():
             <div class="container">
                 <p>This calendar provides a schedule of Yale Football games that you can add to your calendar app.</p>
                 <p>To subscribe to this calendar in your calendar app, use this URL:</p>
-                <pre>""" + request.url_root + """calendar.ics</pre>
-                <p><a href="/calendar.ics">Download Calendar</a></p>
-                <p>The calendar updates daily with the latest game information from ESPN.</p>
-                <p>Current season: """ + str(current_season) + """</p>
-                
-                <div class="season-selector">
-                    <p><strong>View a different season:</strong></p>
-                    <p>
-                        <a href="/season/2023">2023</a> | 
-                        <a href="/season/2024">2024</a> | 
-                        <a href="/season/2025">2025</a>
-                    </p>
-                    <p><a href="/debug">View Debug Information</a></p>
-                </div>
+                <pre>https://raw.githubusercontent.com/LordOfTheTrees/YaleFootballSchedule/main/yale_football.ics</pre>
+                <p><a href="https://raw.githubusercontent.com/LordOfTheTrees/YaleFootballSchedule/main/yale_football.ics">Direct Link to Calendar File</a></p>
+                <p>The calendar updates daily with the latest game information from the Yale Bulldogs website.</p>
             </div>
             <div class="footer">
-                <p>Data sourced from ESPN. Updated daily.</p>
+                <p>Data sourced from yalebulldogs.com. Updated daily.</p>
                 <p>This service is not affiliated with Yale University.</p>
+                <p>Source code available on <a href="https://github.com/LordOfTheTrees/YaleFootballSchedule">GitHub</a>.</p>
             </div>
         </body>
     </html>
