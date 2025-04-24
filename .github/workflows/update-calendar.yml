@@ -1,0 +1,83 @@
+name: Update Yale Football Calendar
+
+on:
+  schedule:
+    # Run at 3am ET (7am UTC)
+    - cron: '0 7 * * *'
+  workflow_dispatch:  # Allow manual trigger through GitHub UI
+
+jobs:
+  update-calendar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 ics
+          
+      - name: Create update script
+        run: |
+          cat > update_calendar.py << 'EOF'
+          import requests
+          from bs4 import BeautifulSoup
+          import ics
+          from ics import Calendar, Event
+          import datetime
+          import logging
+          import sys
+          
+          # Import required functions from the main script
+          sys.path.append('.')
+          from Script import get_current_season, parse_date_time, create_calendar, scrape_schedule
+          
+          # Configure basic logging
+          logging.basicConfig(
+              level=logging.INFO,
+              format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+          )
+          logger = logging.getLogger("calendar_updater")
+          
+          # Run the update process
+          logger.info("Starting calendar update...")
+          
+          try:
+              # Get current season and update the calendar
+              current_season = get_current_season()
+              logger.info(f"Updating calendar for season {current_season}")
+              
+              # Scrape the schedule and create the calendar
+              games = scrape_schedule()
+              cal = create_calendar(games)
+              
+              logger.info(f"Calendar updated successfully with {len(games)} games")
+              sys.exit(0)  # Exit with success code
+              
+          except Exception as e:
+              logger.error(f"Error updating calendar: {str(e)}")
+              sys.exit(1)  # Exit with error code
+          EOF
+          
+      - name: Run update script
+        run: python update_calendar.py
+        
+      - name: Check for calendar changes
+        id: calendar-changes
+        run: |
+          git diff --quiet yale_football.ics || echo "changes=true" >> $GITHUB_OUTPUT
+          
+      - name: Commit and push changes
+        if: steps.calendar-changes.outputs.changes == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add yale_football.ics
+          git commit -m "Update Yale football calendar [automated]"
+          git push
