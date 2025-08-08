@@ -117,7 +117,7 @@ jobs:
           
       - name: Upload calendar as artifact
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: yale-football-calendar
           path: yale_football.ics
