@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__)
 
-# Base URLs for Yale football on ESPN
-BASE_URL_TEMPLATE = "https://www.espn.com/college-football/team/schedule/_/id/43/season/{season}"
-BASE_URL = BASE_URL_TEMPLATE.format(season=datetime.datetime.now().year)
+# Base URLs for Yale football
+YALE_BASE_URL = "https://yalebulldogs.com/sports/football/schedule/{season}"
+ESPN_BASE_URL_TEMPLATE = "https://www.espn.com/college-football/team/schedule/_/id/43/season/{season}"
 CALENDAR_FILE = "yale_football.ics"
 
 def get_current_season():
@@ -47,25 +47,11 @@ def parse_date_time(date_str, time_str):
         time_str = time_str.strip() if time_str else ""
         
         # Check if year is missing from date_str
-        if date_str and not any(str(year) in date_str for year in range(2023, 2026)):
-            # Extract year from URL or use current year
-            year_from_url = None
-            if BASE_URL:
-                import re
-                year_match = re.search(r'/(\d{4})/?', BASE_URL)
-                if year_match:
-                    year_from_url = year_match.group(1)
-            
-            # If we found a year in the URL, use it
-            if year_from_url:
-                date_str = f"{date_str}, {year_from_url}"
-            else:
-                # Default to current year
-                current_year = datetime.datetime.now().year
-                date_str = f"{date_str}, {current_year}"
+        if date_str and not any(str(year) in date_str for year in range(2023, 2027)):
+            current_season = get_current_season()
+            date_str = f"{date_str}, {current_season}"
         
         # Handle various date formats
-        # First, try to use dateutil's parser if available
         try:
             from dateutil import parser
             game_date = parser.parse(date_str)
@@ -74,8 +60,6 @@ def parse_date_time(date_str, time_str):
             # Fall back to manual parsing
             date_parts = date_str.replace(",", "").split()
             if len(date_parts) >= 3:
-                # Handle formats like "Sat, Nov 1, 2024" or "Nov 1, 2024"
-                # Find the month, day, and year elements
                 month_str = None
                 day_str = None
                 year_str = None
@@ -95,7 +79,7 @@ def parse_date_time(date_str, time_str):
                 }
                 
                 if month_str and day_str and year_str:
-                    month = month_dict.get(month_str, 1)  # Default to January if not found
+                    month = month_dict.get(month_str, 1)
                     day = int(day_str)
                     year = int(year_str)
                 else:
@@ -103,15 +87,13 @@ def parse_date_time(date_str, time_str):
                     now = datetime.datetime.now()
                     month, day, year = now.month, now.day, now.year
             else:
-                # If date format is unexpected, log it and use current year/future date
                 logger.warning(f"Unexpected date format: {date_str}")
                 now = datetime.datetime.now()
                 month, day, year = now.month, now.day, now.year
         
         # Parse time (if available)
         hour, minute = 12, 0  # Default to noon
-        if time_str and time_str.lower() not in ["tba", "tbd"]:
-            # Log for debugging
+        if time_str and time_str.lower() not in ["tba", "tbd", ""]:
             logger.debug(f"Parsing time: '{time_str}'")
             
             # Handle AM/PM
@@ -126,7 +108,6 @@ def parse_date_time(date_str, time_str):
                 hour = int(time_parts[0])
                 minute = int(time_parts[1]) if len(time_parts) > 1 else 0
             else:
-                # Handle cases where time might just be "12 PM" without colon
                 try:
                     hour = int(clean_time) if clean_time.isdigit() else 12
                     minute = 0
@@ -145,11 +126,6 @@ def parse_date_time(date_str, time_str):
         game_datetime = datetime.datetime(year, month, day, hour, minute)
         logger.debug(f"Parsed datetime: {game_datetime}")
         
-        # Sanity check - if the date is way in the future or past, it might be wrong
-        now = datetime.datetime.now()
-        if abs((game_datetime - now).days) > 365:
-            logger.warning(f"Parsed date {game_datetime} is more than a year away from current date. This might be incorrect.")
-        
         return game_datetime
     
     except Exception as e:
@@ -157,175 +133,140 @@ def parse_date_time(date_str, time_str):
         # Return a placeholder date in the future
         return datetime.datetime.now() + datetime.timedelta(days=30)
 
-def scrape_schedule(year=None):
-    """Scrape the Yale football schedule and return game details"""
-    logger.info("Starting Yale football schedule scraping...")
+def scrape_yale_schedule(season=None):
+    """Scrape from the official Yale Bulldogs website"""
+    if season is None:
+        season = get_current_season()
+    
+    logger.info(f"Scraping Yale Bulldogs website for season {season}")
     games = []
     
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
         }
-        response = requests.get(BASE_URL, headers=headers)
+        
+        url = YALE_BASE_URL.format(season=season)
+        logger.info(f"Fetching from: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Find the schedule table/elements - try multiple approaches
-        # First, try ESPN style (Table__TR)
-        schedule_items = soup.select('tr.Table__TR, tr.filled')
+        # Look for Yale's schedule structure
+        # Try different selectors that Yale might use
+        schedule_items = []
         
-        # If not found, try the common class names for schedule items
+        # Look for Sidearm schedule items (common in college athletics)
+        schedule_items = soup.select('.sidearm-schedule-game')
+        
         if not schedule_items:
-            schedule_items = soup.select('.sidearm-schedule-games-container .sidearm-schedule-game, .event-row')
+            # Try alternative selectors
+            schedule_items = soup.select('.schedule-item, .game-item, .event-item')
         
-        # If we couldn't find the elements with the common class names, try some alternatives
         if not schedule_items:
-            schedule_items = soup.select('div[id*="schedule"] tr, div[class*="schedule"] .event')
+            # Try table-based structure
+            schedule_items = soup.select('table.schedule tbody tr, .schedule-table tbody tr')
         
-        # If still nothing, try a more general approach
         if not schedule_items:
-            schedule_items = soup.select('table tbody tr[data-url], div[class*="schedule"] li, div[class*="events"] li')
+            # Try div-based structure with data attributes
+            schedule_items = soup.select('div[data-game], div[data-event]')
         
-        logger.info(f"Found {len(schedule_items)} potential schedule items")
+        if not schedule_items:
+            # Generic fallback - look for any structure containing game data
+            schedule_items = soup.select('div:has(.date):has(.opponent), tr:has(.date):has(.opponent)')
+        
+        logger.info(f"Found {len(schedule_items)} potential schedule items on Yale site")
         
         for item in schedule_items:
             try:
-                # Extract date - try ESPN format first, then fallback to others
+                # Extract date information
                 date_elem = (
-                    item.select_one('[data-testid="date"]') or
-                    item.select_one('.sidearm-schedule-game-opponent-date, .event-date, [data-field="date"]') or
+                    item.select_one('.sidearm-schedule-game-opponent-date, .game-date, .event-date, .date') or
+                    item.find('div', class_=lambda c: c and 'date' in c.lower()) or
                     item.find('span', class_=lambda c: c and 'date' in c.lower()) or
-                    item.find('div', class_=lambda c: c and 'date' in c.lower())
+                    item.find('td', class_=lambda c: c and 'date' in c.lower())
                 )
-                date_str = date_elem.text.strip() if date_elem else ""
                 
-                # Extract time - try ESPN format first, then fallback
-                time_elem = (
-                    item.select_one('[data-testid="time"]') or
-                    item.select_one('.sidearm-schedule-game-time, .event-time, [data-field="time"]') or
-                    item.find('span', class_=lambda c: c and 'time' in c.lower()) or
-                    item.find('div', class_=lambda c: c and 'time' in c.lower())
-                )
-                time_str = time_elem.text.strip() if time_elem else "TBA"
-                
-                # Clean up time if it contains extra content
-                if time_str:
-                    # If time contains a link, extract just the time text
-                    if time_elem and time_elem.find('a'):
-                        time_str = time_elem.find('a').text.strip()
-                    # If it's TBD or similar
-                    if 'TBD' in time_str:
-                        time_str = "TBD"
-                
-                # Extract opponent - try ESPN format first
-                opponent = None
-                opponent_container = item.select_one('[data-testid="opponent"]')
-                if opponent_container:
-                    # Look for the text link inside the opponent container
-                    opponent_links = opponent_container.select('a.AnchorLink')
-                    if opponent_links:
-                        # Get the last link (usually the team name link)
-                        opponent_text = opponent_links[-1].text.strip()
-                        # Remove any trailing spaces or dashes that ESPN might add
-                        opponent = opponent_text.replace('--', '').strip()
+                date_str = ""
+                if date_elem:
+                    # Look for nested date elements
+                    month_elem = date_elem.select_one('.month, .sidearm-schedule-game-opponent-date-month')
+                    day_elem = date_elem.select_one('.day, .sidearm-schedule-game-opponent-date-day')
+                    
+                    if month_elem and day_elem:
+                        month_text = month_elem.get_text(strip=True)
+                        day_text = day_elem.get_text(strip=True)
+                        date_str = f"{month_text} {day_text}"
                     else:
-                        # If no link, try to get text content (excluding "vs" or "at")
-                        opponent_text = opponent_container.get_text(strip=True)
-                        if opponent_text.lower().startswith('vs '):
-                            opponent = opponent_text[3:].strip()
-                        elif opponent_text.lower().startswith('at '):
-                            opponent = opponent_text[3:].strip()
-                        else:
-                            opponent = opponent_text
+                        date_str = date_elem.get_text(strip=True)
                 
-                # If still no opponent, try the original selectors
-                if not opponent:
-                    opponent_elem = (
-                        item.select_one('.sidearm-schedule-game-opponent-name, .event-opponent, [data-field="opponent"]') or
-                        item.find('span', class_=lambda c: c and ('opponent' in c.lower() or 'team' in c.lower())) or
-                        item.find('div', class_=lambda c: c and ('opponent' in c.lower() or 'team' in c.lower()))
-                    )
-                    opponent = opponent_elem.text.strip() if opponent_elem else "Unknown Opponent"
+                # Extract time information
+                time_elem = (
+                    item.select_one('.sidearm-schedule-game-opponent-time, .game-time, .event-time, .time') or
+                    item.find('div', class_=lambda c: c and 'time' in c.lower()) or
+                    item.find('span', class_=lambda c: c and 'time' in c.lower()) or
+                    item.find('td', class_=lambda c: c and 'time' in c.lower())
+                )
+                time_str = time_elem.get_text(strip=True) if time_elem else "TBA"
+                
+                # Extract opponent information
+                opponent_elem = (
+                    item.select_one('.sidearm-schedule-game-opponent-name, .opponent, .team-name') or
+                    item.find('div', class_=lambda c: c and 'opponent' in c.lower()) or
+                    item.find('span', class_=lambda c: c and 'opponent' in c.lower()) or
+                    item.find('td', class_=lambda c: c and 'opponent' in c.lower())
+                )
+                opponent = opponent_elem.get_text(strip=True) if opponent_elem else "Unknown Opponent"
+                
+                # Clean up opponent name
+                opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent, flags=re.IGNORECASE).strip()
+                
+                # Extract location information
+                location_elem = (
+                    item.select_one('.sidearm-schedule-game-location, .location, .venue') or
+                    item.find('div', class_=lambda c: c and 'location' in c.lower()) or
+                    item.find('span', class_=lambda c: c and 'location' in c.lower()) or
+                    item.find('td', class_=lambda c: c and 'location' in c.lower())
+                )
+                location = location_elem.get_text(strip=True) if location_elem else ""
+                
+                # Extract broadcast information
+                broadcast_elem = (
+                    item.select_one('.sidearm-schedule-game-links a, .broadcast, .tv, .stream') or
+                    item.find('div', class_=lambda c: c and ('tv' in c.lower() or 'broadcast' in c.lower())) or
+                    item.find('a', string=re.compile(r'ESPN|Fox|CBS|NBC|Stream|Watch', re.I))
+                )
+                broadcast = broadcast_elem.get_text(strip=True) if broadcast_elem else ""
+                
+                # Determine if it's a home or away game
+                is_home = True  # Default assumption
+                is_away = False
                 
                 # Check for home/away indicators
-                is_away = False
-                is_home = True  # Default to home game
-                
-                # Check for ESPN style indicators
-                vs_indicator = None
-                if opponent_container:
-                    vs_indicator = opponent_container.select_one('span.pr2')
-                
-                if vs_indicator and vs_indicator.text.strip().lower() == "at":
-                    is_away = True
-                    is_home = False
-                elif vs_indicator and vs_indicator.text.strip().lower() == "vs":
-                    is_home = True
-                    is_away = False
-                else:
-                    # Check traditional indicators
-                    location_elem = (
-                        item.select_one('.sidearm-schedule-game-location, .event-location, [data-field="location"]') or
-                        item.find('span', class_=lambda c: c and 'location' in c.lower()) or
-                        item.find('div', class_=lambda c: c and 'location' in c.lower())
-                    )
-                    location = location_elem.text.strip() if location_elem else ""
-                    
-                    # Check for specific "at" indicators in the opponent text or location
-                    is_away = (
-                        "at " in opponent.lower() or 
-                        "@ " in opponent.lower() or 
-                        "away" in location.lower() or
-                        "at " in location.lower()
-                    )
-                    
-                    # If no explicit away indicators, check if class indicates away
-                    if not is_away:
-                        is_away = "away" in item.get('class', [])
-                    
+                home_away_elem = item.select_one('.sidearm-schedule-game-home-away, .home-away')
+                if home_away_elem:
+                    home_away_text = home_away_elem.get_text(strip=True).lower()
+                    is_away = 'away' in home_away_text or 'at' in home_away_text
                     is_home = not is_away
+                else:
+                    # Check location for away indicators
+                    if location and ('away' in location.lower() or 'at ' in location.lower()):
+                        is_away = True
+                        is_home = False
                 
-                # Clean up opponent name (remove "at " prefix if present)
-                if opponent.lower().startswith("at "):
-                    opponent = opponent[3:].strip()
-                elif opponent.lower().startswith("@ "):
-                    opponent = opponent[2:].strip()
+                # Set default location for home games
+                if is_home and not location:
+                    location = "New Haven, Conn.\nYale Bowl, Class of 1954 Field"
                 
-                # Ensure we have a valid opponent name
-                if not opponent or opponent == "Unknown Opponent":
-                    # Look for any link that might have team info
-                    team_links = item.select('a[href*="team"], a[href*="school"]')
-                    if team_links:
-                        for link in team_links:
-                            link_text = link.text.strip()
-                            if link_text and link_text not in ["vs", "at", "TBD", "TBA"]:
-                                opponent = link_text
-                                break
-                
-                # Extract location (if not already done)
-                if not location_elem:
-                    location_elem = item.select_one('td:not(:has([data-testid="opponent"])):not(:has([data-testid="date"])):not(:has([data-testid="time"]))')
-                location = location_elem.text.strip() if location_elem else ""
-                
-                # Try to find location in other ways if still empty
-                if not location:
-                    # Check for venue name in a dedicated element
-                    venue_elem = item.select_one('[data-field="venue"], .venue')
-                    if venue_elem:
-                        location = venue_elem.text.strip()
-                    elif is_home:
-                        location = "New Haven, Conn.\nYale Bowl, Class of 1954 Field"
-                
-                # Extract broadcast info
-                broadcast_elem = (
-                    item.select_one('.sidearm-schedule-game-network, .event-network, [data-field="network"]') or
-                    item.find('span', class_=lambda c: c and 'network' in c.lower()) or
-                    item.find('div', class_=lambda c: c and 'tv' in c.lower())
-                )
-                broadcast = broadcast_elem.text.strip() if broadcast_elem else ""
-                
-                # Create readable title based on home/away status
+                # Create readable title
                 if is_home:
                     title = f"{opponent} at Yale"
                 else:
@@ -362,9 +303,153 @@ def scrape_schedule(year=None):
                 continue
     
     except Exception as e:
-        logger.error(f"Error scraping schedule: {str(e)}")
+        logger.error(f"Error scraping Yale website: {str(e)}")
     
-    logger.info(f"Scraped {len(games)} games")
+    return games
+
+def scrape_espn_schedule(season=None):
+    """Scrape from ESPN as backup"""
+    if season is None:
+        season = get_current_season()
+    
+    logger.info(f"Scraping ESPN for season {season}")
+    games = []
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        
+        url = ESPN_BASE_URL_TEMPLATE.format(season=season)
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # ESPN schedule parsing (existing logic)
+        schedule_items = soup.select('tr.Table__TR, tr.filled')
+        
+        if not schedule_items:
+            schedule_items = soup.select('.sidearm-schedule-games-container .sidearm-schedule-game, .event-row')
+        
+        logger.info(f"Found {len(schedule_items)} potential schedule items on ESPN")
+        
+        for item in schedule_items:
+            try:
+                # ESPN-specific parsing logic (existing code)
+                date_elem = item.select_one('[data-testid="date"]')
+                date_str = date_elem.text.strip() if date_elem else ""
+                
+                time_elem = item.select_one('[data-testid="time"]')
+                time_str = time_elem.text.strip() if time_elem else "TBA"
+                
+                # Clean up time if it contains extra content
+                if time_str and time_elem and time_elem.find('a'):
+                    time_str = time_elem.find('a').text.strip()
+                
+                # Extract opponent
+                opponent = None
+                opponent_container = item.select_one('[data-testid="opponent"]')
+                if opponent_container:
+                    opponent_links = opponent_container.select('a.AnchorLink')
+                    if opponent_links:
+                        opponent_text = opponent_links[-1].text.strip()
+                        opponent = opponent_text.replace('--', '').strip()
+                    else:
+                        opponent_text = opponent_container.get_text(strip=True)
+                        if opponent_text.lower().startswith('vs '):
+                            opponent = opponent_text[3:].strip()
+                        elif opponent_text.lower().startswith('at '):
+                            opponent = opponent_text[3:].strip()
+                        else:
+                            opponent = opponent_text
+                
+                if not opponent:
+                    opponent = "Unknown Opponent"
+                
+                # Check for home/away indicators
+                is_away = False
+                is_home = True
+                
+                vs_indicator = None
+                if opponent_container:
+                    vs_indicator = opponent_container.select_one('span.pr2')
+                
+                if vs_indicator and vs_indicator.text.strip().lower() == "at":
+                    is_away = True
+                    is_home = False
+                elif vs_indicator and vs_indicator.text.strip().lower() == "vs":
+                    is_home = True
+                    is_away = False
+                
+                # Clean up opponent name
+                if opponent.lower().startswith("at "):
+                    opponent = opponent[3:].strip()
+                elif opponent.lower().startswith("@ "):
+                    opponent = opponent[2:].strip()
+                
+                # Set location
+                location = ""
+                if is_home:
+                    location = "New Haven, Conn.\nYale Bowl, Class of 1954 Field"
+                
+                # Extract broadcast info (ESPN doesn't always have this easily accessible)
+                broadcast = ""
+                
+                # Create readable title
+                if is_home:
+                    title = f"{opponent} at Yale"
+                else:
+                    title = f"Yale at {opponent}"
+                
+                # Skip items without date information
+                if not date_str:
+                    logger.warning(f"Skipping item without date information: {title}")
+                    continue
+                
+                # Get datetime object
+                game_datetime = parse_date_time(date_str, time_str)
+                
+                # Game duration (default 3.5 hours)
+                duration = datetime.timedelta(hours=3, minutes=30)
+                
+                game_info = {
+                    'title': title,
+                    'start': game_datetime,
+                    'end': game_datetime + duration,
+                    'location': location,
+                    'broadcast': broadcast,
+                    'is_home': is_home,
+                    'opponent': opponent,
+                    'date_str': date_str,
+                    'time_str': time_str
+                }
+                
+                games.append(game_info)
+                logger.info(f"Scraped game from ESPN: {title} on {game_datetime}")
+                
+            except Exception as e:
+                logger.error(f"Error parsing ESPN game item: {str(e)}")
+                continue
+    
+    except Exception as e:
+        logger.error(f"Error scraping ESPN schedule: {str(e)}")
+    
+    return games
+
+def scrape_schedule(season=None):
+    """Scrape the Yale football schedule, trying Yale first, then ESPN as backup"""
+    logger.info("Starting Yale football schedule scraping...")
+    
+    # Try Yale website first
+    games = scrape_yale_schedule(season)
+    
+    # If Yale scraping didn't work or returned no games, try ESPN as backup
+    if not games:
+        logger.info("Yale website scraping failed or returned no games, trying ESPN as backup...")
+        games = scrape_espn_schedule(season)
+    
+    logger.info(f"Total scraped games: {len(games)}")
     return games
 
 def create_calendar(games):
@@ -384,13 +469,17 @@ def create_calendar(games):
         # Add broadcast info to description
         description = ""
         if game['broadcast']:
-            description += f"Broadcast on: {game['broadcast']}\n"
+            description += f"Broadcast/Stream: {game['broadcast']}\n"
         
         # Add home/away info
         if game['is_home']:
             description += "Home Game"
         else:
             description += "Away Game"
+            
+        # Add opponent info
+        if game['opponent']:
+            description += f"\nOpponent: {game['opponent']}"
             
         event.description = description
         cal.events.add(event)
@@ -402,10 +491,10 @@ def create_calendar(games):
     logger.info(f"Calendar created with {len(games)} events")
     return cal
 
-def update_calendar(custom_season_url=None):
-    """Update the football calendar, optionally using a custom season URL"""
+def update_calendar(custom_season=None):
+    """Update the football calendar"""
     try:
-        games = scrape_schedule(custom_season_url)
+        games = scrape_schedule(custom_season)
         create_calendar(games)
         logger.info("Calendar updated successfully")
     except Exception as e:
@@ -484,7 +573,7 @@ def index():
                 <p>The calendar updates daily with the latest game information from the Yale Bulldogs website.</p>
             </div>
             <div class="footer">
-                <p>Data sourced from yalebulldogs.com. Updated daily.</p>
+                <p>Data sourced from yalebulldogs.com with ESPN as backup. Updated daily.</p>
                 <p>This service is not affiliated with Yale University.</p>
                 <p>Source code available on <a href="https://github.com/LordOfTheTrees/YaleFootballSchedule">GitHub</a>.</p>
             </div>
@@ -500,7 +589,7 @@ def debug_info():
         current_season = get_current_season()
         
         # Scrape the schedule for the current season
-        games = scrape_schedule()
+        games = scrape_schedule(current_season)
         
         # Check if we got any games
         if not games:
@@ -525,7 +614,7 @@ def debug_info():
             '<a href="/season/2024">2024</a> | '
             '<a href="/season/2025">2025</a>'
             '</p></div>'
-            '<p>This page shows the raw data extracted from the ESPN website.</p>'
+            '<p>This page shows the raw data extracted from yalebulldogs.com (with ESPN as backup).</p>'
             '<table>'
             '<tr><th>Game</th><th>Date</th><th>Time</th><th>Location</th><th>Broadcast</th></tr>'
             + ''.join([
@@ -550,12 +639,10 @@ def set_season(year):
         if year < 2000 or year > current_year + 1:
             return f"Invalid season year: {year}. Must be between 2000 and {current_year + 1}", 400
         
-        # Build the specific URL for this season
-        season_url = f"https://www.espn.com/college-football/team/schedule/_/id/43/season/{year}"
-        logger.info(f"Manual season change request to {year}. Using URL: {season_url}")
+        logger.info(f"Manual season change request to {year}")
         
-        # Scrape the specified season using the custom URL
-        games = scrape_schedule(custom_season_url=season_url)
+        # Scrape the specified season
+        games = scrape_schedule(year)
         
         # Create/update the calendar
         if games:
@@ -572,7 +659,8 @@ if __name__ == "__main__":
     # Display startup information
     current_season = get_current_season()
     logger.info(f"Starting Yale Football Schedule Scraper for season {current_season}")
-    logger.info(f"Using ESPN URL: {BASE_URL_TEMPLATE.format(season=current_season)}")
+    logger.info(f"Primary source: {YALE_BASE_URL.format(season=current_season)}")
+    logger.info(f"Backup source: {ESPN_BASE_URL_TEMPLATE.format(season=current_season)}")
     
     # Create scheduler for daily updates
     scheduler = BackgroundScheduler()
