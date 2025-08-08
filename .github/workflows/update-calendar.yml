@@ -2,8 +2,9 @@ name: Update Yale Football Calendar
 
 on:
   schedule:
-    # Run at 3am ET (7am UTC)
+    # Run at 3am ET (7am UTC) and 3pm ET (19pm UTC) for better coverage
     - cron: '0 7 * * *'
+    - cron: '0 19 * * *'
   workflow_dispatch:  # Allow manual trigger through GitHub UI
 
 # Add permissions for writing to the repository
@@ -25,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 ics flask apscheduler
+          pip install requests beautifulsoup4 ics flask apscheduler python-dateutil
           
       - name: Create update script
         run: |
@@ -57,15 +58,32 @@ jobs:
               current_season = get_current_season()
               logger.info(f"Updating calendar for season {current_season}")
               
-              # Scrape the schedule and create the calendar
-              games = scrape_schedule()
+              # Scrape the schedule (tries Yale first, then ESPN as backup)
+              games = scrape_schedule(current_season)
+              
+              if not games:
+                  logger.error("No games found from either Yale or ESPN sources")
+                  sys.exit(1)
+              
+              # Create the calendar
               cal = create_calendar(games)
               
               logger.info(f"Calendar updated successfully with {len(games)} games")
+              
+              # Print summary for GitHub Actions log
+              print(f"\n=== CALENDAR UPDATE SUMMARY ===")
+              print(f"Season: {current_season}")
+              print(f"Games found: {len(games)}")
+              print("Games:")
+              for game in games:
+                  print(f"  - {game['title']} ({game['date_str']} {game['time_str']})")
+              print("================================\n")
+              
               sys.exit(0)  # Exit with success code
               
           except Exception as e:
               logger.error(f"Error updating calendar: {str(e)}")
+              print(f"ERROR: {str(e)}")
               sys.exit(1)  # Exit with error code
           EOF
           
@@ -75,7 +93,16 @@ jobs:
       - name: Check for calendar changes
         id: calendar-changes
         run: |
-          git diff --quiet yale_football.ics || echo "changes=true" >> $GITHUB_OUTPUT
+          if git diff --quiet yale_football.ics; then
+            echo "No changes detected in calendar file"
+            echo "changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected in calendar file"
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "=== CALENDAR CHANGES ==="
+            git diff --stat yale_football.ics
+            echo "========================"
+          fi
           
       - name: Commit and push changes
         if: steps.calendar-changes.outputs.changes == 'true'
@@ -83,7 +110,15 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add yale_football.ics
-          git commit -m "Update Yale football calendar [automated]"
+          git commit -m "Update Yale football calendar [automated] - $(date '+%Y-%m-%d %H:%M:%S')"
           git push origin HEAD:${{ github.ref }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Upload calendar as artifact
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: yale-football-calendar
+          path: yale_football.ics
+          retention-days: 30
