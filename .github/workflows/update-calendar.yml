@@ -17,6 +17,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # Fetch full history to avoid issues
         
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -104,26 +107,70 @@ jobs:
             echo "========================"
           fi
           
-      - name: Get current date
-        id: date
-        if: steps.calendar-changes.outputs.changes == 'true'
-        run: echo "date=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
-          
-      - name: Commit and push changes
+      - name: Commit and push changes with conflict handling
         if: steps.calendar-changes.outputs.changes == 'true'
         run: |
+          # Configure git
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Pull latest changes first
-          git pull origin main --no-rebase || true
+          # Get the current timestamp
+          TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
           
-          # Add and commit
+          # Fetch latest changes from remote
+          git fetch origin main
+          
+          # Check if we're behind remote
+          LOCAL=$(git rev-parse HEAD)
+          REMOTE=$(git rev-parse origin/main)
+          
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "Local branch is behind remote. Attempting to merge..."
+            
+            # Stash our calendar changes temporarily
+            git stash push -m "temp calendar changes" -- yale_football.ics
+            
+            # Pull latest changes
+            git pull origin main --no-rebase
+            
+            # Apply our calendar changes back
+            git stash pop || {
+              echo "Conflict detected, resolving by keeping our calendar version"
+              git checkout --theirs yale_football.ics
+              git add yale_football.ics
+            }
+          fi
+          
+          # Add and commit our changes
           git add yale_football.ics
-          git commit -m "Update Yale football calendar [automated] - ${{ steps.date.outputs.date }}" || exit 0
+          git commit -m "Update Yale football calendar [automated] - $TIMESTAMP" || {
+            echo "Nothing to commit after merge"
+            exit 0
+          }
           
-          # Force push since we only care about the calendar file
-          git push origin main --force-with-lease
+          # Push with retry logic
+          for attempt in 1 2 3; do
+            if git push origin main; then
+              echo "Successfully pushed on attempt $attempt"
+              exit 0
+            else
+              echo "Push failed on attempt $attempt"
+              if [ $attempt -lt 3 ]; then
+                echo "Retrying in 5 seconds..."
+                sleep 5
+                git fetch origin main
+                git rebase origin/main || {
+                  echo "Rebase failed, trying reset approach"
+                  git reset --hard origin/main
+                  git add yale_football.ics
+                  git commit -m "Update Yale football calendar [automated] - $TIMESTAMP"
+                }
+              else
+                echo "All push attempts failed"
+                exit 1
+              fi
+            fi
+          done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
