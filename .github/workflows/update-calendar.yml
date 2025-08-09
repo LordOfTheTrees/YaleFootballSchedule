@@ -104,17 +104,19 @@ jobs:
             echo "========================"
           fi
           
+      - name: Get current date
+        id: date
+        if: steps.calendar-changes.outputs.changes == 'true'
+        run: echo "date=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+          
       - name: Commit and push changes
         if: steps.calendar-changes.outputs.changes == 'true'
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git pull origin ${{ github.ref_name }} --rebase
-          git add yale_football.ics
-          git commit -m "Update Yale football calendar [automated] - $(date '+%Y-%m-%d %H:%M:%S')"
-          git push origin HEAD:${{ github.ref_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update Yale football calendar [automated] - ${{ steps.date.outputs.date }}"
+          file_pattern: yale_football.ics
+          commit_user_name: github-actions[bot]
+          commit_user_email: github-actions[bot]@users.noreply.github.com
           
       - name: Upload calendar as artifact
         if: always()
