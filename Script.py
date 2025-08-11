@@ -593,7 +593,7 @@ def create_calendar(games):
         cal.events.add(event)
     
     with open(CALENDAR_FILE, 'w') as f:
-        f.write(str(cal))
+        f.write(cal.serialize())
     
     logger.info(f"Calendar created with {len(games)} events")
     return cal
