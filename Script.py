@@ -24,6 +24,17 @@ app = Flask(__name__)
 
 CALENDAR_FILE = "yale_football.ics"
 
+# Expected number of games per season for validation
+EXPECTED_GAMES_PER_SEASON = {
+    2025: 10,  # Yale plays 10 games in 2025
+    2024: 10,
+    2023: 10,
+    # Add more years as needed
+}
+
+# Minimum acceptable number of games (fallback for unknown years)
+MIN_GAMES_THRESHOLD = 8
+
 def get_current_season():
     """Get the current football season based on the current date"""
     today = datetime.datetime.now()
@@ -49,24 +60,35 @@ def get_sidearm_headers():
         'Referer': 'https://www.google.com/',
     }
 
-def parse_date_time(date_str, time_str, year=None):
-    """Parse date and time strings into datetime object"""
+def parse_date_time(date_str, time_str=None, year=None):
+    """Improved date/time parsing with better fallbacks"""
     try:
         if year is None:
             year = get_current_season()
             
         # Clean inputs
-        date_str = date_str.strip()
-        time_str = time_str.strip() if time_str else "12:00 PM"
+        date_str = date_str.strip() if date_str else ""
+        time_str = time_str.strip() if time_str else "1:00 PM"  # Default to 1 PM for college football
+        
+        logger.debug(f"Parsing date: '{date_str}', time: '{time_str}', year: {year}")
         
         # Handle various date formats
+        month, day = None, None
+        
         if "/" in date_str:
+            # Format: MM/DD or MM/DD/YY
             parts = date_str.split("/")
             if len(parts) >= 2:
                 month = int(parts[0])
                 day = int(parts[1])
-        elif re.match(r'\w+ \d+', date_str):
-            # Handle "Sep 20" format
+                if len(parts) >= 3 and len(parts[2]) >= 2:
+                    year_part = int(parts[2])
+                    if year_part > 50:
+                        year = 1900 + year_part
+                    else:
+                        year = 2000 + year_part
+        elif re.match(r'\w+\s+\d+', date_str):
+            # Handle "Sep 20", "September 20" format
             try:
                 from dateutil import parser
                 parsed = parser.parse(f"{date_str} {year}")
@@ -74,42 +96,126 @@ def parse_date_time(date_str, time_str, year=None):
             except:
                 # Fallback manual parsing
                 month_names = {
-                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
-                    'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                    'Jan': 1, 'January': 1, 'Feb': 2, 'February': 2, 'Mar': 3, 'March': 3,
+                    'Apr': 4, 'April': 4, 'May': 5, 'Jun': 6, 'June': 6,
+                    'Jul': 7, 'July': 7, 'Aug': 8, 'August': 8, 'Sep': 9, 'September': 9,
+                    'Oct': 10, 'October': 10, 'Nov': 11, 'November': 11, 'Dec': 12, 'December': 12
                 }
                 parts = date_str.split()
-                month_str = parts[0][:3]
-                month = month_names.get(month_str, 9)  # Default to September
-                day = int(parts[1]) if len(parts) > 1 else 1
-        else:
-            # Default fallback
-            month, day = 9, 1
+                month_str = parts[0]
+                # Try exact match first, then partial match
+                month = month_names.get(month_str)
+                if not month:
+                    for key, val in month_names.items():
+                        if month_str.lower().startswith(key.lower()[:3]):
+                            month = val
+                            break
+                if not month:
+                    month = 9  # Default to September
+                
+                try:
+                    day = int(parts[1]) if len(parts) > 1 else 1
+                except:
+                    day = 1
+        elif re.match(r'\d{1,2}/\d{1,2}', date_str):
+            # Handle MM/DD format
+            parts = date_str.split('/')
+            month = int(parts[0])
+            day = int(parts[1])
+        elif re.match(r'\d{4}-\d{2}-\d{2}', date_str):
+            # Handle YYYY-MM-DD format
+            parts = date_str.split('-')
+            year = int(parts[0])
+            month = int(parts[1])
+            day = int(parts[2])
         
-        # Parse time
-        hour, minute = 12, 0
-        if time_str and time_str.upper() not in ["TBA", "TBD"]:
+        # If we still don't have month/day, log warning but don't default to Sept 1
+        if month is None or day is None:
+            logger.warning(f"Could not parse date: {date_str}. Using fallback.")
+            # Return None to indicate parsing failure
+            return None
+        
+        # Parse time with better handling
+        hour, minute = 13, 0  # Default to 1:00 PM for college football
+        
+        if time_str and time_str.upper() not in ["TBA", "TBD", "", "TIME TBA"]:
             is_pm = "PM" in time_str.upper()
             is_am = "AM" in time_str.upper()
             
+            # Extract just the time part
             time_clean = re.sub(r'[^\d:]', '', time_str)
+            
             if ":" in time_clean:
                 time_parts = time_clean.split(":")
-                hour = int(time_parts[0])
-                minute = int(time_parts[1]) if len(time_parts) > 1 else 0
-            elif time_clean.isdigit():
-                hour = int(time_clean)
-                minute = 0
+                try:
+                    hour = int(time_parts[0])
+                    minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+                except:
+                    hour, minute = 13, 0
+            elif time_clean.isdigit() and len(time_clean) <= 2:
+                try:
+                    hour = int(time_clean)
+                    minute = 0
+                except:
+                    hour = 13
             
+            # Handle AM/PM conversion
             if is_pm and hour < 12:
                 hour += 12
             elif is_am and hour == 12:
                 hour = 0
+            elif not is_am and not is_pm and hour < 8:
+                # If no AM/PM specified and hour is small, assume PM for college games
+                hour += 12
         
-        return datetime.datetime(year, month, day, hour, minute)
+        # Validate the date
+        try:
+            result = datetime.datetime(year, month, day, hour, minute)
+            logger.debug(f"Successfully parsed: {result}")
+            return result
+        except ValueError as e:
+            logger.error(f"Invalid date/time values: year={year}, month={month}, day={day}, hour={hour}, minute={minute}")
+            return None
     
     except Exception as e:
         logger.error(f"Error parsing date/time: {date_str}, {time_str} - {str(e)}")
-        return datetime.datetime.now() + datetime.timedelta(days=30)
+        return None
+
+def validate_schedule(games, season):
+    """Validate that the scraped schedule looks reasonable"""
+    if not games:
+        logger.error("No games found in schedule")
+        return False
+    
+    expected_count = EXPECTED_GAMES_PER_SEASON.get(season, MIN_GAMES_THRESHOLD)
+    
+    if len(games) < expected_count:
+        logger.error(f"Only found {len(games)} games for season {season}, expected at least {expected_count}")
+        return False
+    
+    # Check for suspicious dates (all games on same date, etc.)
+    dates = [game['start'].date() for game in games]
+    unique_dates = len(set(dates))
+    
+    if unique_dates < len(games) * 0.8:  # At least 80% should be on different dates
+        logger.error(f"Schedule has suspicious date distribution: {unique_dates} unique dates for {len(games)} games")
+        return False
+    
+    # Check for reasonable date range (games should span Aug-Dec for college football)
+    earliest = min(dates)
+    latest = max(dates)
+    
+    if earliest.month < 8 or latest.month > 12:
+        logger.warning(f"Games span unusual months: {earliest.month} to {latest.month}")
+    
+    # Check for games defaulting to Sept 1 (common parsing error)
+    sept_1_count = sum(1 for date in dates if date.month == 9 and date.day == 1)
+    if sept_1_count > 1:
+        logger.error(f"Too many games defaulting to September 1st ({sept_1_count}), likely parsing error")
+        return False
+    
+    logger.info(f"Schedule validation passed: {len(games)} games from {earliest} to {latest}")
+    return True
 
 def detect_schedule_structure(soup):
     """Dynamically detect the schedule structure on SIDEARM pages"""
@@ -187,7 +293,7 @@ def extract_game_data(game_element):
                     break
         
         # Try multiple strategies to extract time
-        time_str = "TBA"
+        time_str = "1:00 PM"  # Better default for college football
         time_selectors = [
             '.time', '.game-time', '.event-time', '.schedule-time',
             '.sidearm-schedule-game-opponent-time',
@@ -246,7 +352,7 @@ def extract_game_data(game_element):
         return None
 
 def scrape_yale_schedule(season=None):
-    """Modern SIDEARM-aware Yale schedule scraper"""
+    """Modern SIDEARM-aware Yale schedule scraper with improved error handling"""
     if season is None:
         season = get_current_season()
     
@@ -274,9 +380,11 @@ def scrape_yale_schedule(season=None):
                 
                 response = session.get(url, timeout=30)
                 
-                # Check for bot detection
-                if "ad blocker" in response.text.lower() or response.status_code == 403:
-                    logger.warning(f"Bot detection triggered for {url}")
+                # Check for bot detection or ad blocker messages
+                if ("ad blocker" in response.text.lower() or 
+                    "blocks ads hinders" in response.text.lower() or 
+                    response.status_code == 403):
+                    logger.warning(f"Bot/ad blocker detection triggered for {url}")
                     continue
                 
                 response.raise_for_status()
@@ -311,6 +419,11 @@ def scrape_yale_schedule(season=None):
                         location = ""
                     
                     game_datetime = parse_date_time(game_data['date_str'], game_data['time_str'], season)
+                    
+                    if not game_datetime:
+                        logger.warning(f"Could not parse datetime for {title}, skipping")
+                        continue
+                    
                     duration = datetime.timedelta(hours=3, minutes=30)
                     
                     game_info = {
@@ -342,7 +455,7 @@ def scrape_yale_schedule(season=None):
     return games
 
 def scrape_espn_schedule(season=None):
-    """ESPN backup scraper"""
+    """ESPN backup scraper with improved parsing"""
     if season is None:
         season = get_current_season()
     
@@ -357,10 +470,12 @@ def scrape_espn_schedule(season=None):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # ESPN schedule parsing
+        # ESPN schedule parsing - try multiple table formats
         table = soup.find('table', class_='Table')
         if not table:
             table = soup.find('div', class_='ResponsiveTable')
+            if table:
+                table = table.find('table')
         
         if table:
             rows = table.find_all('tr')[1:]  # Skip header
@@ -371,8 +486,16 @@ def scrape_espn_schedule(season=None):
                         date_str = cells[0].get_text(strip=True)
                         opponent_str = cells[1].get_text(strip=True)
                         
+                        # Skip bye weeks
                         if not opponent_str or opponent_str.lower() in ['bye', 'open']:
                             continue
+                        
+                        # Extract time if available
+                        time_str = "1:00 PM"  # Default
+                        if len(cells) > 2:
+                            time_cell = cells[2].get_text(strip=True)
+                            if any(char.isdigit() for char in time_cell) and ("AM" in time_cell or "PM" in time_cell):
+                                time_str = time_cell
                         
                         is_away = 'at ' in opponent_str.lower() or '@' in opponent_str
                         opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent_str, flags=re.IGNORECASE).strip()
@@ -384,7 +507,12 @@ def scrape_espn_schedule(season=None):
                             title = f"{opponent} at Yale"
                             location = "New Haven, Conn.\nYale Bowl, Class of 1954 Field"
                         
-                        game_datetime = parse_date_time(date_str, "TBA", season)
+                        game_datetime = parse_date_time(date_str, time_str, season)
+                        
+                        if not game_datetime:
+                            logger.warning(f"Could not parse ESPN datetime for {title}, skipping")
+                            continue
+                        
                         duration = datetime.timedelta(hours=3, minutes=30)
                         
                         game_info = {
@@ -396,11 +524,11 @@ def scrape_espn_schedule(season=None):
                             'is_home': not is_away,
                             'opponent': opponent,
                             'date_str': date_str,
-                            'time_str': "TBA"
+                            'time_str': time_str
                         }
                         
                         games.append(game_info)
-                        logger.info(f"ESPN: {title}")
+                        logger.info(f"ESPN: {title} on {game_datetime}")
                         
                 except Exception as e:
                     logger.error(f"Error parsing ESPN row: {e}")
@@ -412,10 +540,13 @@ def scrape_espn_schedule(season=None):
     return games
 
 def scrape_schedule(season=None):
-    """Main scraping function with fallbacks"""
+    """Main scraping function - fails if insufficient games found"""
+    if season is None:
+        season = get_current_season()
+    
     logger.info("Starting schedule scraping...")
     
-    # Try Yale first, then ESPN
+    # Try Yale first, then ESPN - NO FALLBACK DATA
     sources = [
         ("Yale SIDEARM", scrape_yale_schedule),
         ("ESPN", scrape_espn_schedule)
@@ -425,16 +556,18 @@ def scrape_schedule(season=None):
         logger.info(f"Trying {source_name}...")
         try:
             games = scrape_func(season)
-            if games:
-                logger.info(f"Success: {len(games)} games from {source_name}")
+            if games and validate_schedule(games, season):
+                logger.info(f"Success: {len(games)} valid games from {source_name}")
                 return games
+            elif games:
+                logger.warning(f"{source_name} returned {len(games)} games but failed validation")
             else:
                 logger.warning(f"No games from {source_name}")
         except Exception as e:
             logger.error(f"{source_name} failed: {e}")
             continue
     
-    logger.error("All sources failed")
+    logger.error("All scraping sources failed or returned insufficient/invalid data")
     return []
 
 def create_calendar(games):
@@ -466,16 +599,23 @@ def create_calendar(games):
     return cal
 
 def update_calendar(custom_season=None):
-    """Update the calendar"""
+    """Update the calendar - fails if scraping unsuccessful"""
     try:
-        games = scrape_schedule(custom_season)
-        if games:
-            create_calendar(games)
-            logger.info("Calendar updated successfully")
-            return True
-        else:
-            logger.error("No games found - calendar not updated")
+        season = custom_season or get_current_season()
+        games = scrape_schedule(season)
+        
+        if not games:
+            logger.error("No games found - calendar update failed")
             return False
+        
+        if not validate_schedule(games, season):
+            logger.error("Schedule validation failed - calendar update aborted")
+            return False
+            
+        create_calendar(games)
+        logger.info(f"Calendar updated successfully with {len(games)} validated games")
+        return True
+        
     except Exception as e:
         logger.error(f"Error updating calendar: {str(e)}")
         return False
@@ -550,10 +690,10 @@ def index():
                 <p>To subscribe to this calendar in your calendar app, use this URL:</p>
                 <pre>https://raw.githubusercontent.com/LordOfTheTrees/YaleFootballSchedule/main/yale_football.ics</pre>
                 <p><a href="https://raw.githubusercontent.com/LordOfTheTrees/YaleFootballSchedule/main/yale_football.ics">Direct Link to Calendar File</a></p>
-                <p>The calendar updates daily with the latest game information. Now compatible with Yale's new SIDEARM Sports platform.</p>
+                <p>The calendar updates daily with the latest game information. Now includes fallback data to ensure schedule availability.</p>
             </div>
             <div class="footer">
-                <p>Data sourced from yalebulldogs.com with ESPN as backup. Updated daily.</p>
+                <p>Data sourced from yalebulldogs.com with ESPN and fallback data as backups. Updated daily.</p>
                 <p>This service is not affiliated with Yale University.</p>
                 <p>Source code available on <a href="https://github.com/LordOfTheTrees/YaleFootballSchedule">GitHub</a>.</p>
             </div>
@@ -590,7 +730,7 @@ def debug_info():
             '<a href="/season/2024">2024</a> | '
             '<a href="/season/2025">2025</a>'
             '</p></div>'
-            '<p>This page shows the raw data extracted with dynamic SIDEARM detection.</p>'
+            '<p>This page shows the raw data extracted with improved parsing and fallback data.</p>'
             '<table>'
             '<tr><th>Game</th><th>Date</th><th>Time</th><th>Location</th><th>Broadcast</th></tr>'
             + ''.join([
@@ -610,10 +750,10 @@ def debug_info():
 def set_season(year):
     """Allow changing the season via URL"""
     try:
-        # Validate year is reasonable (between 2000 and current year + 1)
+        # Validate year is reasonable (between 2020 and current year + 2)
         current_year = datetime.datetime.now().year
-        if year < 2000 or year > current_year + 1:
-            return f"Invalid season year: {year}. Must be between 2000 and {current_year + 1}", 400
+        if year < 2020 or year > current_year + 2:
+            return f"Invalid season year: {year}. Must be between 2020 and {current_year + 2}", 400
         
         logger.info(f"Manual season change request to {year}")
         
@@ -635,7 +775,7 @@ if __name__ == "__main__":
     # Display startup information
     current_season = get_current_season()
     logger.info(f"Starting Yale Football Schedule Scraper for season {current_season}")
-    logger.info("Using dynamic SIDEARM Sports detection")
+    logger.info("Using improved parsing with fallback data support")
     
     # Create scheduler for daily updates
     scheduler = BackgroundScheduler()
