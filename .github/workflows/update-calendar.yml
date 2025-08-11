@@ -2,9 +2,9 @@ name: Update Yale Football Calendar
 
 on:
   schedule:
-    # Run at 3am ET (7am UTC) and 3pm ET (19pm UTC) for better coverage
-    - cron: '0 7 * * *'
-    - cron: '0 19 * * *'
+    # Run at 8am ET (12pm UTC) and 8pm ET (12am UTC) for better coverage
+    - cron: '0 12 * * *'
+    - cron: '0 0 * * *'
   workflow_dispatch:  # Allow manual trigger through GitHub UI
 
 # Add permissions for writing to the repository
@@ -24,7 +24,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           
       - name: Install dependencies
         run: |
@@ -41,10 +41,18 @@ jobs:
           import datetime
           import logging
           import sys
+          import os
+          import re
           
           # Import required functions from the main script
           sys.path.append('.')
-          from Script import get_current_season, parse_date_time, create_calendar, scrape_schedule
+          try:
+              from Script import (get_current_season, parse_date_time, create_calendar, 
+                                scrape_schedule, validate_schedule, EXPECTED_GAMES_PER_SEASON, MIN_GAMES_THRESHOLD)
+          except ImportError as e:
+              print(f"Import error: {e}")
+              print("Cannot proceed without main script functions")
+              sys.exit(1)
           
           # Configure basic logging
           logging.basicConfig(
@@ -61,11 +69,28 @@ jobs:
               current_season = get_current_season()
               logger.info(f"Updating calendar for season {current_season}")
               
-              # Scrape the schedule (tries Yale first, then ESPN as backup)
+              # Scrape the schedule (tries Yale first, then ESPN - no fallback)
               games = scrape_schedule(current_season)
               
               if not games:
-                  logger.error("No games found from either Yale or ESPN sources")
+                  logger.error("No games found from any source - scraping failed")
+                  print("ERROR: Schedule scraping failed - no games found")
+                  print("This indicates the scraping logic needs to be updated")
+                  sys.exit(1)
+              
+              # Validate schedule quality
+              expected_count = EXPECTED_GAMES_PER_SEASON.get(current_season, MIN_GAMES_THRESHOLD)
+              if len(games) < expected_count:
+                  logger.error(f"Insufficient games found: {len(games)} < {expected_count}")
+                  print(f"ERROR: Only found {len(games)} games, expected at least {expected_count}")
+                  print("This indicates incomplete scraping - parser may need updates")
+                  sys.exit(1)
+              
+              # Additional validation
+              if not validate_schedule(games, current_season):
+                  logger.error("Schedule failed validation checks")
+                  print("ERROR: Schedule validation failed")
+                  print("Games found but they appear to have parsing errors")
                   sys.exit(1)
               
               # Create the calendar
@@ -74,110 +99,94 @@ jobs:
               logger.info(f"Calendar updated successfully with {len(games)} games")
               
               # Print summary for GitHub Actions log
-              print(f"\n=== CALENDAR UPDATE SUMMARY ===")
+              print(f"\\n=== CALENDAR UPDATE SUCCESS ===")
               print(f"Season: {current_season}")
               print(f"Games found: {len(games)}")
               print("Games:")
               for game in games:
-                  print(f"  - {game['title']} ({game['date_str']} {game['time_str']})")
-              print("================================\n")
+                  print(f"  - {game['title']} ({game['start'].strftime('%m/%d/%Y %I:%M %p')})")
+              print("================================\\n")
               
-              sys.exit(0)  # Exit with success code
+              # Verify the calendar file was created and has content
+              if os.path.exists("yale_football.ics"):
+                  with open("yale_football.ics", 'r') as f:
+                      content = f.read()
+                      if len(content) > 100:  # Basic sanity check
+                          event_count = content.count("BEGIN:VEVENT")
+                          if event_count >= expected_count:
+                              print(f"Calendar file created successfully with {event_count} events")
+                              sys.exit(0)
+                          else:
+                              print(f"Calendar has only {event_count} events, expected {expected_count}")
+                              sys.exit(1)
+                      else:
+                          print("Calendar file too small, may be corrupted")
+                          sys.exit(1)
+              else:
+                  print("Calendar file was not created")
+                  sys.exit(1)
               
           except Exception as e:
               logger.error(f"Error updating calendar: {str(e)}")
               print(f"ERROR: {str(e)}")
-              sys.exit(1)  # Exit with error code
+              sys.exit(1)
           EOF
           
       - name: Run update script
         run: python update_calendar.py
         
+      - name: Verify calendar file
+        run: |
+          if [ ! -f "yale_football.ics" ]; then
+            echo "ERROR: Calendar file not found"
+            exit 1
+          fi
+          
+          # Check file size
+          filesize=$(wc -c < yale_football.ics)
+          if [ $filesize -lt 100 ]; then
+            echo "ERROR: Calendar file too small ($filesize bytes)"
+            exit 1
+          fi
+          
+          # Check for basic iCal structure
+          if ! grep -q "BEGIN:VCALENDAR" yale_football.ics; then
+            echo "ERROR: Invalid iCal format"
+            exit 1
+          fi
+          
+          # Count events and validate
+          event_count=$(grep -c "BEGIN:VEVENT" yale_football.ics)
+          echo "Calendar contains $event_count events"
+          
+          # Check if we have reasonable number of events for the current season
+          current_year=$(date +%Y)
+          current_month=$(date +%m)
+          
+          # Determine expected season
+          if [ $current_month -gt 2 ]; then
+            season=$current_year
+          else
+            season=$((current_year - 1))
+          fi
+          
+          # Expected games (Yale typically plays 10 games)
+          expected_games=10
+          min_games=8
+          
+          if [ $event_count -lt $min_games ]; then
+            echo "ERROR: Calendar has only $event_count events, expected at least $min_games"
+            echo "This indicates scraping failure - the parser needs to be fixed"
+            exit 1
+          elif [ $event_count -lt $expected_games ]; then
+            echo "WARNING: Calendar has only $event_count events, expected $expected_games"
+            echo "This may indicate incomplete scraping"
+          fi
+          
+          echo "Calendar file validation passed"
+        
       - name: Check for calendar changes
         id: calendar-changes
         run: |
           if git diff --quiet yale_football.ics; then
-            echo "No changes detected in calendar file"
-            echo "changes=false" >> $GITHUB_OUTPUT
-          else
-            echo "Changes detected in calendar file"
-            echo "changes=true" >> $GITHUB_OUTPUT
-            echo "=== CALENDAR CHANGES ==="
-            git diff --stat yale_football.ics
-            echo "========================"
-          fi
-          
-      - name: Commit and push changes with conflict handling
-        if: steps.calendar-changes.outputs.changes == 'true'
-        run: |
-          # Configure git
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          
-          # Get the current timestamp
-          TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-          
-          # Fetch latest changes from remote
-          git fetch origin main
-          
-          # Check if we're behind remote
-          LOCAL=$(git rev-parse HEAD)
-          REMOTE=$(git rev-parse origin/main)
-          
-          if [ "$LOCAL" != "$REMOTE" ]; then
-            echo "Local branch is behind remote. Attempting to merge..."
-            
-            # Stash our calendar changes temporarily
-            git stash push -m "temp calendar changes" -- yale_football.ics
-            
-            # Pull latest changes
-            git pull origin main --no-rebase
-            
-            # Apply our calendar changes back
-            git stash pop || {
-              echo "Conflict detected, resolving by keeping our calendar version"
-              git checkout --theirs yale_football.ics
-              git add yale_football.ics
-            }
-          fi
-          
-          # Add and commit our changes
-          git add yale_football.ics
-          git commit -m "Update Yale football calendar [automated] - $TIMESTAMP" || {
-            echo "Nothing to commit after merge"
-            exit 0
-          }
-          
-          # Push with retry logic
-          for attempt in 1 2 3; do
-            if git push origin main; then
-              echo "Successfully pushed on attempt $attempt"
-              exit 0
-            else
-              echo "Push failed on attempt $attempt"
-              if [ $attempt -lt 3 ]; then
-                echo "Retrying in 5 seconds..."
-                sleep 5
-                git fetch origin main
-                git rebase origin/main || {
-                  echo "Rebase failed, trying reset approach"
-                  git reset --hard origin/main
-                  git add yale_football.ics
-                  git commit -m "Update Yale football calendar [automated] - $TIMESTAMP"
-                }
-              else
-                echo "All push attempts failed"
-                exit 1
-              fi
-            fi
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Upload calendar as artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: yale-football-calendar
-          path: yale_football.ics
-          retention-days: 30
+            echo
