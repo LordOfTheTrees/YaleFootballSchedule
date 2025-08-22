@@ -2,9 +2,8 @@ name: Update Yale Football Calendar
 
 on:
   schedule:
-    # Run at 8am ET (12pm UTC) and 8pm ET (12am UTC) for better coverage
-    - cron: '0 12 * * *'
-    - cron: '0 0 * * *'
+    # Run at 2am ET (6am UTC) for better coverage
+    - cron: '0 6 * * *'
   workflow_dispatch:  # Allow manual trigger through GitHub UI
 
 # Add permissions for writing to the repository
