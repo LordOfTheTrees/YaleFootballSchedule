@@ -62,14 +62,14 @@ jobs:
           logger = logging.getLogger("calendar_updater")
           
           # Run the update process
-          logger.info("Starting calendar update...")
+          logger.info("Starting Yale Football calendar update...")
           
           try:
               # Get current season and update the calendar
               current_season = get_current_season()
               logger.info(f"Updating calendar for season {current_season}")
               
-              # Scrape the schedule (tries Yale first, then ESPN - no fallback)
+              # Scrape the schedule (tries Yale first, then ESPN)
               games = scrape_schedule(current_season)
               
               if not games:
@@ -99,13 +99,13 @@ jobs:
               logger.info(f"Calendar updated successfully with {len(games)} games")
               
               # Print summary for GitHub Actions log
-              print(f"\\n=== CALENDAR UPDATE SUCCESS ===")
+              print(f"\\n=== YALE FOOTBALL CALENDAR UPDATE SUCCESS ===")
               print(f"Season: {current_season}")
               print(f"Games found: {len(games)}")
               print("Games:")
               for game in games:
                   print(f"  - {game['title']} ({game['start'].strftime('%m/%d/%Y %I:%M %p')})")
-              print("================================\\n")
+              print("==============================================\\n")
               
               # Verify the calendar file was created and has content
               if os.path.exists("yale_football.ics"):
@@ -170,7 +170,7 @@ jobs:
             season=$((current_year - 1))
           fi
           
-          # Expected games (Yale typically plays 10 games)
+          # Expected games (Yale typically plays 10 games in Ivy League)
           expected_games=10
           min_games=8
           
@@ -189,4 +189,58 @@ jobs:
         id: calendar-changes
         run: |
           if git diff --quiet yale_football.ics; then
-            echo
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "No changes to the calendar file"
+          else
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "Calendar file has been updated"
+          fi
+        
+      - name: Commit and push changes
+        if: steps.calendar-changes.outputs.changes == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add yale_football.ics
+          git commit -m "Update Yale football calendar - $(date '+%Y-%m-%d %H:%M:%S UTC')"
+          git push
+        
+      - name: Display calendar info
+        run: |
+          echo "### Yale Football Calendar Update Complete"
+          echo "**File:** yale_football.ics"
+          echo "**Events:** $(grep -c "BEGIN:VEVENT" yale_football.ics || echo "0")"
+          echo "**Last Updated:** $(date)"
+          echo ""
+          echo "**Recent games:**"
+          # Extract and display first few events for verification
+          python3 -c "
+          import re
+          with open('yale_football.ics', 'r') as f:
+              content = f.read()
+          
+          # Find all SUMMARY lines (game titles)
+          summaries = re.findall(r'SUMMARY:(.+)', content)
+          dtstart = re.findall(r'DTSTART:(\d{8}T\d{6})', content)
+          
+          print('**Upcoming games:**')
+          for i, (summary, dt) in enumerate(zip(summaries[:5], dtstart[:5])):
+              # Parse date
+              year, month, day = dt[:4], dt[4:6], dt[6:8]
+              hour, minute = dt[9:11], dt[11:13]
+              print(f'- {summary} ({month}/{day}/{year} {hour}:{minute})')
+          "
+          
+      - name: Calendar URL info
+        run: |
+          echo ""
+          echo "### Yale Football Calendar Access Information"
+          echo "**Direct URL:** https://raw.githubusercontent.com/${{ github.repository }}/main/yale_football.ics"
+          echo "**Subscribe URL:** Same as above - use this URL in your calendar app"
+          echo ""
+          echo "### How to Use"
+          echo "1. Copy the URL above"
+          echo "2. In your calendar app (Google Calendar, Outlook, Apple Calendar, etc.):"
+          echo "   - Look for 'Add Calendar' or 'Subscribe to Calendar'"
+          echo "   - Paste the URL"
+          echo "   - The calendar will automatically update when

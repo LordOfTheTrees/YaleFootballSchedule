@@ -6,10 +6,7 @@ import datetime
 import time
 import os
 import re
-from flask import Flask, Response, request
 import logging
-import json
-from apscheduler.schedulers.background import BackgroundScheduler
 
 # Configure logging
 logging.basicConfig(
@@ -19,14 +16,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Flask app
-app = Flask(__name__)
-
 CALENDAR_FILE = "yale_football.ics"
 
 # Expected number of games per season for validation
 EXPECTED_GAMES_PER_SEASON = {
-    2025: 10,  # Yale plays 10 games in 2025
+    2025: 10,  # Yale typically plays 10 games in Ivy League
     2024: 10,
     2023: 10,
     # Add more years as needed
@@ -68,7 +62,7 @@ def parse_date_time(date_str, time_str=None, year=None):
             
         # Clean inputs
         date_str = date_str.strip() if date_str else ""
-        time_str = time_str.strip() if time_str else "1:00 PM"  # Default to 1 PM for college football
+        time_str = time_str.strip() if time_str else "12:00 PM"  # Default to 12 PM for Ivy League football
         
         logger.debug(f"Parsing date: '{date_str}', time: '{time_str}', year: {year}")
         
@@ -136,7 +130,7 @@ def parse_date_time(date_str, time_str=None, year=None):
             return None
         
         # Parse time with better handling
-        hour, minute = 13, 0  # Default to 1:00 PM for college football
+        hour, minute = 12, 0  # Default to 12:00 PM for Ivy League football
         
         if time_str and time_str.upper() not in ["TBA", "TBD", "", "TIME TBA"]:
             is_pm = "PM" in time_str.upper()
@@ -151,13 +145,13 @@ def parse_date_time(date_str, time_str=None, year=None):
                     hour = int(time_parts[0])
                     minute = int(time_parts[1]) if len(time_parts) > 1 else 0
                 except:
-                    hour, minute = 13, 0
+                    hour, minute = 12, 0
             elif time_clean.isdigit() and len(time_clean) <= 2:
                 try:
                     hour = int(time_clean)
                     minute = 0
                 except:
-                    hour = 13
+                    hour = 12
             
             # Handle AM/PM conversion
             if is_pm and hour < 12:
@@ -293,7 +287,7 @@ def extract_game_data(game_element):
                     break
         
         # Try multiple strategies to extract time
-        time_str = "1:00 PM"  # Better default for college football
+        time_str = "12:00 PM"  # Better default for Ivy League football
         time_selectors = [
             '.time', '.game-time', '.event-time', '.schedule-time',
             '.sidearm-schedule-game-opponent-time',
@@ -364,10 +358,10 @@ def scrape_yale_schedule(season=None):
         session = requests.Session()
         session.headers.update(headers)
         
-        # Try the schedule page with multiple approaches
+        # Try the schedule page with the best URL first
         base_urls = [
+            "https://yalebulldogs.com/sports/football/schedule",  # Best direct URL
             f"https://yalebulldogs.com/sports/football/schedule/{season}",
-            f"https://yalebulldogs.com/sports/football/schedule",
             f"https://yalebulldogs.com/schedule?sport=football&season={season}"
         ]
         
@@ -464,7 +458,7 @@ def scrape_espn_schedule(season=None):
     
     try:
         headers = get_sidearm_headers()
-        url = f"https://www.espn.com/college-football/team/schedule/_/id/43/season/{season}"
+        url = f"https://www.espn.com/college-football/team/schedule/_/id/43/yale-bulldogs"
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         
@@ -491,7 +485,7 @@ def scrape_espn_schedule(season=None):
                             continue
                         
                         # Extract time if available
-                        time_str = "1:00 PM"  # Default
+                        time_str = "12:00 PM"  # Default
                         if len(cells) > 2:
                             time_cell = cells[2].get_text(strip=True)
                             if any(char.isdigit() for char in time_cell) and ("AM" in time_cell or "PM" in time_cell):
@@ -620,175 +614,15 @@ def update_calendar(custom_season=None):
         logger.error(f"Error updating calendar: {str(e)}")
         return False
 
-@app.route('/calendar.ics')
-def serve_calendar():
-    """Serve the calendar file"""
-    try:
-        with open(CALENDAR_FILE, 'r') as f:
-            cal_content = f.read()
-            
-        # Add raw GitHub URL to the PRODID field if not already present
-        if "PRODID:" in cal_content and "raw.githubusercontent.com" not in cal_content:
-            cal_content = cal_content.replace(
-                "PRODID:ics.py - http://git.io/lLljaA",
-                "PRODID:Yale Football Schedule - https://raw.githubusercontent.com/LordOfTheTrees/YaleFootballSchedule/main/yale_football.ics"
-            )
-            
-        return Response(cal_content, mimetype='text/calendar')
-    except Exception as e:
-        logger.error(f"Error serving calendar: {str(e)}")
-        return "Calendar not available", 500
-
-@app.route('/')
-def index():
-    """Landing page"""
-    return """
-    <html>
-        <head>
-            <title>Yale Football Calendar</title>
-            <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    max-width: 800px;
-                    margin: 0 auto;
-                    padding: 20px;
-                    line-height: 1.6;
-                }
-                h1 {
-                    color: #00356b; /* Yale Blue */
-                }
-                .container {
-                    border: 1px solid #ddd;
-                    padding: 20px;
-                    border-radius: 5px;
-                    background-color: #f9f9f9;
-                }
-                pre {
-                    background-color: #eee;
-                    padding: 10px;
-                    border-radius: 5px;
-                    overflow-x: auto;
-                }
-                a {
-                    color: #00356b;
-                    text-decoration: none;
-                }
-                a:hover {
-                    text-decoration: underline;
-                }
-                .footer {
-                    margin-top: 30px;
-                    font-size: 0.8em;
-                    color: #777;
-                }
-            </style>
-        </head>
-        <body>
-            <h1>Yale Football Calendar</h1>
-            <div class="container">
-                <p>This calendar provides a schedule of Yale Football games that you can add to your calendar app.</p>
-                <p>To subscribe to this calendar in your calendar app, use this URL:</p>
-                <pre>https://raw.githubusercontent.com/LordOfTheTrees/YaleFootballSchedule/main/yale_football.ics</pre>
-                <p><a href="https://raw.githubusercontent.com/LordOfTheTrees/YaleFootballSchedule/main/yale_football.ics">Direct Link to Calendar File</a></p>
-                <p>The calendar updates daily with the latest game information. Now includes fallback data to ensure schedule availability.</p>
-            </div>
-            <div class="footer">
-                <p>Data sourced from yalebulldogs.com with ESPN and fallback data as backups. Updated daily.</p>
-                <p>This service is not affiliated with Yale University.</p>
-                <p>Source code available on <a href="https://github.com/LordOfTheTrees/YaleFootballSchedule">GitHub</a>.</p>
-            </div>
-        </body>
-    </html>
-    """
-
-@app.route('/debug')
-def debug_info():
-    """Debug information"""
-    try:
-        current_season = get_current_season()
-        games = scrape_schedule(current_season)
-        
-        if not games:
-            return "No games found. Check the logs for error details.", 500
-        
-        return Response(
-            '<html><head><title>Debug Info</title>'
-            '<style>'
-            'body { font-family: Arial, sans-serif; padding: 20px; }'
-            'table { border-collapse: collapse; width: 100%; }'
-            'th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }'
-            'tr:nth-child(even) { background-color: #f2f2f2; }'
-            'th { background-color: #00356b; color: white; }'
-            'h1 { color: #00356b; }'
-            '.season-selector { margin: 20px 0; }'
-            '</style>'
-            '</head><body>'
-            f'<h1>Yale Football Schedule - Debug Info (Season {current_season})</h1>'
-            '<div class="season-selector">'
-            '<p>View a different season: '
-            '<a href="/season/2023">2023</a> | '
-            '<a href="/season/2024">2024</a> | '
-            '<a href="/season/2025">2025</a>'
-            '</p></div>'
-            '<p>This page shows the raw data extracted with improved parsing and fallback data.</p>'
-            '<table>'
-            '<tr><th>Game</th><th>Date</th><th>Time</th><th>Location</th><th>Broadcast</th></tr>'
-            + ''.join([
-                f'<tr><td>{g["title"]}</td><td>{g["date_str"]}</td><td>{g["time_str"]}</td>'
-                f'<td>{g["location"]}</td><td>{g["broadcast"]}</td></tr>'
-                for g in games
-            ])
-            + '</table>'
-            '<p>Total games found: ' + str(len(games)) + '</p>'
-            '</body></html>',
-            mimetype='text/html'
-        )
-    except Exception as e:
-        return f"Error: {str(e)}", 500
-
-@app.route('/season/<int:year>')
-def set_season(year):
-    """Allow changing the season via URL"""
-    try:
-        # Validate year is reasonable (between 2020 and current year + 2)
-        current_year = datetime.datetime.now().year
-        if year < 2020 or year > current_year + 2:
-            return f"Invalid season year: {year}. Must be between 2020 and {current_year + 2}", 400
-        
-        logger.info(f"Manual season change request to {year}")
-        
-        # Scrape the specified season
-        games = scrape_schedule(year)
-        
-        # Create/update the calendar
-        if games:
-            create_calendar(games)
-            return f"Calendar updated for season {year}. Found {len(games)} games. <a href='/calendar.ics'>Download Calendar</a>", 200
-        else:
-            return f"No games found for season {year}. Please check the logs for details.", 500
-            
-    except Exception as e:
-        logger.error(f"Error processing season {year}: {str(e)}")
-        return f"Error: {str(e)}", 500
-
 if __name__ == "__main__":
     # Display startup information
     current_season = get_current_season()
     logger.info(f"Starting Yale Football Schedule Scraper for season {current_season}")
     logger.info("Using improved parsing with fallback data support")
     
-    # Create scheduler for daily updates
-    scheduler = BackgroundScheduler()
-    
     # Initial calendar creation
     success = update_calendar()
     if not success:
         logger.error("Initial calendar creation failed")
-    
-    # Schedule daily updates at 3 AM
-    scheduler.add_job(update_calendar, 'cron', hour=3)
-    scheduler.start()
-    
-    # Run the Flask app
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    else:
+        print(f"Calendar updated successfully for season {current_season}")
