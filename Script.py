@@ -55,7 +55,7 @@ def get_sidearm_headers():
     }
 
 def parse_date_time(date_str, time_str=None, year=None):
-    """Improved date/time parsing with better fallbacks"""
+    """Improved date/time parsing with better fallbacks - returns timezone-aware datetime"""
     try:
         if year is None:
             year = get_current_season()
@@ -174,10 +174,25 @@ def parse_date_time(date_str, time_str=None, year=None):
                 # If no AM/PM specified and hour is small, assume PM for college games
                 hour += 12
         
-        # Validate the date
+        # Validate the date and create timezone-aware datetime
         try:
-            result = datetime.datetime(year, month, day, hour, minute)
-            logger.debug(f"Successfully parsed: {result}")
+            # Import timezone support
+            from datetime import timezone, timedelta
+            
+            # Create timezone-naive datetime first
+            naive_dt = datetime.datetime(year, month, day, hour, minute)
+            
+            # Add Eastern timezone (UTC-5 in standard time, UTC-4 in daylight time)
+            # For football season (Sep-Dec), this is mostly Eastern Daylight Time (UTC-4)
+            eastern_tz = timezone(timedelta(hours=-5))  # EST
+            
+            # Check if we're in daylight saving time period (roughly March-November)
+            if month >= 3 and month <= 11:
+                eastern_tz = timezone(timedelta(hours=-4))  # EDT
+            
+            result = naive_dt.replace(tzinfo=eastern_tz)
+            
+            logger.debug(f"Successfully parsed with timezone: {result}")
             return result
         except ValueError as e:
             logger.error(f"Invalid date/time values: year={year}, month={month}, day={day}, hour={hour}, minute={minute}")
