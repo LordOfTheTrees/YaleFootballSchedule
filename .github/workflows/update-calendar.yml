@@ -2,8 +2,9 @@ name: Update Yale Football Calendar
 
 on:
   schedule:
-    # Run at 2am ET (6am UTC) for better coverage
-    - cron: '0 6 * * *'
+    # Run at 8am ET (12pm UTC) and 8pm ET (12am UTC) for better coverage
+    - cron: '0 12 * * *'
+    - cron: '0 0 * * *'
   workflow_dispatch:  # Allow manual trigger through GitHub UI
 
 # Add permissions for writing to the repository
@@ -242,4 +243,14 @@ jobs:
           echo "2. In your calendar app (Google Calendar, Outlook, Apple Calendar, etc.):"
           echo "   - Look for 'Add Calendar' or 'Subscribe to Calendar'"
           echo "   - Paste the URL"
-          echo "   - The calendar will automatically update when
+          echo "   - The calendar will automatically update when changes are made"
+          echo ""
+          echo "### Repository"
+          echo "Source code: https://github.com/${{ github.repository }}"
+          
+      - name: Upload calendar as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yale-football-calendar
+          path: yale_football.ics
+          retention-days: 30
