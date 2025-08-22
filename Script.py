@@ -81,6 +81,18 @@ def parse_date_time(date_str, time_str=None, year=None):
                         year = 1900 + year_part
                     else:
                         year = 2000 + year_part
+        elif re.match(r'\w+,?\s+\w+\s+\d+', date_str):
+            # Handle ESPN format: "Sat, Sep 20" or "Saturday, September 20"
+            try:
+                from dateutil import parser
+                # Remove day of week and parse the rest
+                date_without_day = re.sub(r'^\w+,?\s+', '', date_str)
+                parsed = parser.parse(f"{date_without_day} {year}")
+                month, day = parsed.month, parsed.day
+                logger.debug(f"ESPN date format parsed: '{date_str}' -> month={month}, day={day}")
+            except Exception as e:
+                logger.error(f"Could not parse ESPN date format '{date_str}': {e}")
+                return None
         elif re.match(r'\w+\s+\d+', date_str):
             # Handle "Sep 20", "September 20" format
             try:
@@ -479,6 +491,10 @@ def scrape_espn_schedule(season=None):
                     if len(cells) >= 2:
                         date_str = cells[0].get_text(strip=True)
                         opponent_str = cells[1].get_text(strip=True)
+                        
+                        # Skip header rows
+                        if date_str.upper() in ['DATE', 'DAY', 'WEEK'] or opponent_str.upper() in ['OPPONENT', 'TEAM']:
+                            continue
                         
                         # Skip bye weeks
                         if not opponent_str or opponent_str.lower() in ['bye', 'open']:
