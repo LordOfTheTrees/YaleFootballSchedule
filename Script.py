@@ -7,6 +7,7 @@ import time
 import os
 import re
 import logging
+import sys
 from zoneinfo import ZoneInfo
 
 # Configure logging
@@ -397,6 +398,11 @@ def scrape_yale_schedule(season=None):
                     logger.warning(f"Bot/ad blocker detection triggered for {url}")
                     continue
                 
+                # Check for "No Data Available" message
+                if "No Data Available" in response.text.lower():
+                    logger.info(f"'No Data Available' detected for season {season} - schedule not yet published")
+                    return None  # Return None to indicate "No Data Available" (distinct from empty list)
+                
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
@@ -476,6 +482,12 @@ def scrape_espn_schedule(season=None):
         headers = get_sidearm_headers()
         url = f"https://www.espn.com/college-football/team/schedule/_/id/43/yale-bulldogs"
         response = requests.get(url, headers=headers, timeout=30)
+        
+        # Check for "No Data Available" message
+        if "No Data Available" in response.text.lower():
+            logger.info(f"'No Data Available' detected for season {season} - schedule not yet published")
+            return None  # Return None to indicate "No Data Available" (distinct from empty list)
+        
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -554,7 +566,7 @@ def scrape_espn_schedule(season=None):
     return games
 
 def scrape_schedule(season=None):
-    """Main scraping function - fails if insufficient games found"""
+    """Main scraping function - returns None if 'No Data Available', empty list if failed, or games if successful"""
     if season is None:
         season = get_current_season()
     
@@ -570,6 +582,10 @@ def scrape_schedule(season=None):
         logger.info(f"Trying {source_name}...")
         try:
             games = scrape_func(season)
+            # Check if this is the special "No Data Available" case
+            if games is None:
+                logger.info(f"'No Data Available' detected from {source_name} for season {season}")
+                return None  # Return None to indicate "No Data Available"
             if games and validate_schedule(games, season):
                 logger.info(f"Success: {len(games)} valid games from {source_name}")
                 return games
@@ -613,10 +629,15 @@ def create_calendar(games):
     return cal
 
 def update_calendar(custom_season=None):
-    """Update the calendar - fails if scraping unsuccessful"""
+    """Update the calendar - gracefully exits if 'No Data Available', fails if scraping unsuccessful"""
     try:
         season = custom_season or get_current_season()
         games = scrape_schedule(season)
+        
+        # Check for "No Data Available" case - exit gracefully without updating calendar
+        if games is None:
+            logger.info(f"'No Data Available' for season {season} - exiting without modifying existing calendar")
+            return True  # Return True to indicate successful completion (no update needed)
         
         if not games:
             logger.error("No games found - calendar update failed")
@@ -643,6 +664,8 @@ if __name__ == "__main__":
     # Initial calendar creation
     success = update_calendar()
     if not success:
-        logger.error("Initial calendar creation failed")
+        logger.error("Calendar update failed - script exiting with error code")
+        sys.exit(1)
     else:
+        logger.info(f"Calendar update completed successfully for season {current_season}")
         print(f"Calendar updated successfully for season {current_season}")

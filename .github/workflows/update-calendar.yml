@@ -71,6 +71,13 @@ jobs:
               # Scrape the schedule (tries Yale first, then ESPN)
               games = scrape_schedule(current_season)
               
+              # Check for "No Data Available" case - exit successfully without updating calendar
+              if games is None:
+                  logger.info(f"'No Data Available' for season {current_season} - exiting without modifying existing calendar")
+                  print(f"INFO: 'No Data Available' for season {current_season} - schedule not yet published")
+                  print("Calendar file unchanged - this is expected when schedule is not yet available")
+                  sys.exit(0)
+              
               if not games:
                   logger.error("No games found from any source - scraping failed")
                   print("ERROR: Schedule scraping failed - no games found")
