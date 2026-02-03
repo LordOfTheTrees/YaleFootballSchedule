@@ -8,15 +8,25 @@ import os
 import re
 import logging
 import sys
+import random
 from zoneinfo import ZoneInfo
 
-# Configure logging
+# Configure logging first
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.FileHandler("yale_football_scraper.log"), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
+
+# Try to import curl_cffi for TLS fingerprinting, fallback to requests if not available
+try:
+    from curl_cffi import requests as curl_requests
+    CURL_CFFI_AVAILABLE = True
+    logger.info("curl_cffi available - using TLS fingerprinting")
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+    logger.warning("curl_cffi not available - falling back to standard requests")
 
 CALENDAR_FILE = "yale_football.ics"
 
@@ -30,6 +40,143 @@ EXPECTED_GAMES_PER_SEASON = {
 
 # Minimum acceptable number of games (fallback for unknown years)
 MIN_GAMES_THRESHOLD = 8
+
+# User-Agent rotation pool (Chrome versions for Windows and macOS)
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+]
+
+def _wait_random_time():
+    """Random delay between requests to mimic human behavior"""
+    wait_time = random.uniform(3, 7)  # Base wait 3-7 seconds
+    if random.random() < 0.1:  # 10% chance of longer wait
+        wait_time = random.uniform(10, 20)
+    if random.random() < 0.01:  # 1% chance of very long wait
+        wait_time = random.uniform(30, 60)
+    time.sleep(wait_time)
+    return wait_time
+
+def get_browser_headers(user_agent=None, referer=None, is_navigation=True):
+    """Generate browser-like headers with proper Sec-Fetch-* and Sec-CH-UA headers"""
+    if user_agent is None:
+        user_agent = random.choice(USER_AGENTS)
+    
+    # Extract Chrome version from User-Agent for Sec-CH-UA
+    chrome_version_match = re.search(r'Chrome/(\d+)', user_agent)
+    chrome_version = chrome_version_match.group(1) if chrome_version_match else "122"
+    
+    headers = {
+        'User-Agent': user_agent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document' if is_navigation else 'empty',
+        'Sec-Fetch-Mode': 'navigate' if is_navigation else 'cors',
+        'Sec-Fetch-Site': 'same-origin' if referer else 'none',
+        'Sec-Fetch-User': '?1',
+        'Sec-CH-UA': f'"Chromium";v="{chrome_version}", "Google Chrome";v="{chrome_version}", "Not-A.Brand";v="24"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"Windows"' if 'Windows' in user_agent else '"macOS"',
+        'Cache-Control': 'max-age=0',
+    }
+    
+    if referer:
+        headers['Referer'] = referer
+    
+    return headers
+
+class BrowserSession:
+    """Session manager with bot detection avoidance techniques"""
+    
+    def __init__(self):
+        self.session = None
+        self.last_url = None
+        self.user_agent = random.choice(USER_AGENTS)
+        self._initialize_session()
+    
+    def _initialize_session(self):
+        """Initialize session with TLS fingerprinting if available"""
+        if CURL_CFFI_AVAILABLE:
+            try:
+                # Use curl_cffi to impersonate Chrome TLS fingerprint
+                self.session = curl_requests.Session(impersonate="chrome120")
+                logger.info("Initialized session with curl_cffi (Chrome TLS fingerprint)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize curl_cffi session: {e}, falling back to requests")
+                self.session = requests.Session()
+        else:
+            self.session = requests.Session()
+        
+        # Set initial headers
+        self.session.headers.update(get_browser_headers(user_agent=self.user_agent))
+    
+    def visit_homepage(self, homepage_url='https://yalebulldogs.com/'):
+        """Visit homepage first to establish session and get cookies"""
+        try:
+            logger.info(f"Visiting homepage to establish session: {homepage_url}")
+            headers = get_browser_headers(user_agent=self.user_agent, is_navigation=True)
+            response = self.session.get(homepage_url, headers=headers, timeout=30)
+            
+            # Check for Cloudflare challenge
+            if response.status_code == 403:
+                response_preview = response.text[:500].lower()
+                if 'just a moment' in response_preview or 'challenge' in response_preview:
+                    logger.warning("⚠️  Cloudflare challenge page detected on homepage")
+                    return False
+            
+            self.last_url = homepage_url
+            logger.info("Homepage visit successful - session established")
+            return True
+        except Exception as e:
+            logger.error(f"Error visiting homepage: {e}")
+            return False
+    
+    def get(self, url, **kwargs):
+        """Make GET request with bot detection avoidance"""
+        # Add random delay
+        wait_time = _wait_random_time()
+        logger.debug(f"Waiting {wait_time:.2f} seconds before request to {url}")
+        
+        # Set headers with referer tracking
+        headers = kwargs.pop('headers', {})
+        browser_headers = get_browser_headers(
+            user_agent=self.user_agent,
+            referer=self.last_url,
+            is_navigation=True
+        )
+        browser_headers.update(headers)
+        kwargs['headers'] = browser_headers
+        
+        # Make request
+        try:
+            response = self.session.get(url, timeout=30, **kwargs)
+        except Exception as e:
+            logger.error(f"Request failed for {url}: {e}")
+            raise
+        
+        # Update last URL for referer tracking
+        self.last_url = url
+        
+        # Check for Cloudflare challenge
+        if response.status_code == 403:
+            response_preview = response.text[:500].lower()
+            if 'just a moment' in response_preview or 'challenge' in response_preview:
+                logger.warning(f"⚠️  Cloudflare challenge page detected for {url}")
+        
+        return response
+    
+    def close(self):
+        """Close the session"""
+        if self.session:
+            self.session.close()
 
 def get_current_season():
     """Get the current football season based on the current date"""
@@ -363,17 +510,21 @@ def extract_game_data(game_element):
         return None
 
 def scrape_yale_schedule(season=None):
-    """Modern SIDEARM-aware Yale schedule scraper with improved error handling"""
+    """Modern SIDEARM-aware Yale schedule scraper with improved error handling and bot detection avoidance"""
     if season is None:
         season = get_current_season()
     
     logger.info(f"Scraping Yale schedule for season {season}")
     games = []
+    browser_session = None
     
     try:
-        headers = get_sidearm_headers()
-        session = requests.Session()
-        session.headers.update(headers)
+        # Initialize browser session with bot detection avoidance
+        browser_session = BrowserSession()
+        
+        # Visit homepage first to establish session
+        if not browser_session.visit_homepage('https://yalebulldogs.com/'):
+            logger.warning("Failed to establish session via homepage, continuing anyway...")
         
         # Try the schedule page with the best URL first
         base_urls = [
@@ -386,22 +537,32 @@ def scrape_yale_schedule(season=None):
             try:
                 logger.info(f"Trying URL: {url}")
                 
-                # Add delay to avoid being flagged as bot
-                time.sleep(2)
+                response = browser_session.get(url)
                 
-                response = session.get(url, timeout=30)
+                response_text_lower = response.text.lower()
+                
+                # Check for "No Data Available" message FIRST - before bot detection check
+                # This way we catch it even if bot detection is also triggered
+                no_data_patterns = [
+                    "no data available",
+                    "no schedule available",
+                    "schedule not available",
+                    "no games scheduled",
+                    "no events found",
+                    "schedule coming soon"
+                ]
+                if any(pattern in response_text_lower for pattern in no_data_patterns):
+                    logger.info(f"'No Data Available' detected for season {season} - schedule not yet published")
+                    logger.debug(f"Response preview: {response.text[:500]}")
+                    return None  # Return None to indicate "No Data Available" (distinct from empty list)
                 
                 # Check for bot detection or ad blocker messages
-                if ("ad blocker" in response.text.lower() or 
-                    "blocks ads hinders" in response.text.lower() or 
+                if ("ad blocker" in response_text_lower or 
+                    "blocks ads hinders" in response_text_lower or 
                     response.status_code == 403):
                     logger.warning(f"Bot/ad blocker detection triggered for {url}")
+                    logger.debug(f"Response status: {response.status_code}, Preview: {response.text[:500]}")
                     continue
-                
-                # Check for "No Data Available" message
-                if "No Data Available" in response.text.lower():
-                    logger.info(f"'No Data Available' detected for season {season} - schedule not yet published")
-                    return None  # Return None to indicate "No Data Available" (distinct from empty list)
                 
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'html.parser')
@@ -467,25 +628,45 @@ def scrape_yale_schedule(season=None):
         
     except Exception as e:
         logger.error(f"Error scraping Yale schedule: {str(e)}")
+    finally:
+        if browser_session:
+            browser_session.close()
     
     return games
 
 def scrape_espn_schedule(season=None):
-    """ESPN backup scraper with improved parsing"""
+    """ESPN backup scraper with improved parsing and bot detection avoidance"""
     if season is None:
         season = get_current_season()
     
     logger.info(f"Scraping ESPN for season {season}")
     games = []
+    browser_session = None
     
     try:
-        headers = get_sidearm_headers()
-        url = f"https://www.espn.com/college-football/team/schedule/_/id/43/yale-bulldogs"
-        response = requests.get(url, headers=headers, timeout=30)
+        # Initialize browser session with bot detection avoidance
+        browser_session = BrowserSession()
         
-        # Check for "No Data Available" message
-        if "No Data Available" in response.text.lower():
+        # Visit ESPN homepage first to establish session
+        if not browser_session.visit_homepage('https://www.espn.com/'):
+            logger.warning("Failed to establish session via ESPN homepage, continuing anyway...")
+        
+        url = f"https://www.espn.com/college-football/team/schedule/_/id/43/yale-bulldogs"
+        response = browser_session.get(url)
+        
+        # Check for "No Data Available" message - check multiple variations
+        response_text_lower = response.text.lower()
+        no_data_patterns = [
+            "no data available",
+            "no schedule available",
+            "schedule not available",
+            "no games scheduled",
+            "no events found",
+            "schedule coming soon"
+        ]
+        if any(pattern in response_text_lower for pattern in no_data_patterns):
             logger.info(f"'No Data Available' detected for season {season} - schedule not yet published")
+            logger.debug(f"Response preview: {response.text[:500]}")
             return None  # Return None to indicate "No Data Available" (distinct from empty list)
         
         response.raise_for_status()
@@ -562,6 +743,9 @@ def scrape_espn_schedule(season=None):
         
     except Exception as e:
         logger.error(f"Error scraping ESPN: {str(e)}")
+    finally:
+        if browser_session:
+            browser_session.close()
     
     return games
 
