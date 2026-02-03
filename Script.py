@@ -179,12 +179,18 @@ class BrowserSession:
             self.session.close()
 
 def get_current_season():
-    """Get the current football season based on the current date"""
+    """Get the current football season based on the current date
+    College football seasons run Aug-Dec with playoffs in January, so:
+    - Jan: return previous year (playoffs still ongoing)
+    - Feb-Dec: return current year (upcoming/current season)
+    """
     today = datetime.datetime.now()
-    if today.month > 2:
-        return today.year
-    else:
+    if today.month == 1:
+        # January - playoffs still happening, use previous year's season
         return today.year - 1
+    else:
+        # February onwards - look ahead to upcoming/current season
+        return today.year
 
 def get_sidearm_headers():
     """Headers optimized for SIDEARM Sports platform"""
