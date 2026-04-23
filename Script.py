@@ -32,6 +32,7 @@ CALENDAR_FILE = "yale_football.ics"
 
 # Expected number of games per season for validation
 EXPECTED_GAMES_PER_SEASON = {
+    2026: 10,
     2025: 10,  # Yale typically plays 10 games in Ivy League
     2024: 10,
     2023: 10,
@@ -224,9 +225,9 @@ def parse_date_time(date_str, time_str=None, year=None):
         # Handle various date formats
         month, day = None, None
         
-        if "/" in date_str:
-            # Format: MM/DD or MM/DD/YY
-            parts = date_str.split("/")
+        if "/" in date_str and re.match(r"^\s*\d{1,2}\s*/\s*\d{1,2}", date_str):
+            # Format: MM/DD or MM/DD/YY (avoid "MST) / 2:00 PM (EST)" style SIDEARM strings)
+            parts = [p.strip() for p in date_str.split("/")]
             if len(parts) >= 2:
                 month = int(parts[0])
                 day = int(parts[1])
@@ -562,10 +563,17 @@ def scrape_yale_schedule(season=None):
                     logger.debug(f"Response preview: {response.text[:500]}")
                     return None  # Return None to indicate "No Data Available" (distinct from empty list)
                 
-                # Check for bot detection or ad blocker messages
-                if ("ad blocker" in response_text_lower or 
-                    "blocks ads hinders" in response_text_lower or 
-                    response.status_code == 403):
+                # SIDEARM ships a hidden modal with "Ad Blocker Detected" in the HTML on normal pages.
+                # Only treat ad-blocker copy as a hard wall when schedule markup is missing.
+                has_schedule_markup = (
+                    "sidearm-schedule-games" in response_text_lower
+                    or "sidearm-schedule-game" in response_text_lower
+                )
+                adblock_wall_copy = (
+                    "ad blocker" in response_text_lower
+                    or "blocks ads hinders" in response_text_lower
+                )
+                if response.status_code == 403 or (adblock_wall_copy and not has_schedule_markup):
                     logger.warning(f"Bot/ad blocker detection triggered for {url}")
                     logger.debug(f"Response status: {response.status_code}, Preview: {response.text[:500]}")
                     continue
@@ -660,8 +668,18 @@ def scrape_espn_schedule(season=None):
         url = f"https://www.espn.com/college-football/team/schedule/_/id/43/yale-bulldogs"
         response = browser_session.get(url)
         
-        # Check for "No Data Available" message - check multiple variations
+        # ESPN often serves an AWS WAF browser challenge (HTTP 202, challenge.js) to plain HTTP clients.
         response_text_lower = response.text.lower()
+        if response.status_code == 202 or (
+            "awswaf" in response_text_lower and "challenge-container" in response_text_lower
+        ):
+            logger.warning(
+                "ESPN returned an AWS WAF challenge page instead of schedule HTML "
+                "(install curl_cffi on the runner for TLS impersonation, or rely on Yale SIDEARM)"
+            )
+            return games
+        
+        # Check for "No Data Available" message - check multiple variations
         no_data_patterns = [
             "no data available",
             "no schedule available",
