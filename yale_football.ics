@@ -2,44 +2,12 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Harvard
-DTEND:20261122T203000Z
+DESCRIPTION:Home Game\nOpponent: Princeton
+DTEND:20261115T203000Z
 LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261122T170000Z
-SUMMARY:Harvard at Yale
-UID:83361127-6a8b-4aee-b423-4fd33fbcf018@8336.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Penn
-DTEND:20261025T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261025T160000Z
-SUMMARY:Penn at Yale
-UID:919e07b5-8d43-46ee-8469-fabf34053433@919e.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Cornell
-DTEND:20260927T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20260927T160000Z
-SUMMARY:Cornell at Yale
-UID:1133108d-623c-4d01-bab8-afbb3b917cd4@1133.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Brown
-DTEND:20261108T203000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261108T170000Z
-SUMMARY:Brown at Yale
-UID:262258a8-dd0b-4003-975f-710e32c80504@2622.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Lehigh
-DTEND:20261004T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261004T160000Z
-SUMMARY:Lehigh at Yale
-UID:25337fd4-1831-4ef2-a1be-471345aed85e@2533.org
+DTSTART:20261115T170000Z
+SUMMARY:Princeton at Yale
+UID:82e04097-ac7d-4f83-bdbd-67481eee04ec@82e0.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Holy Cross
@@ -47,47 +15,7 @@ DTEND:20260920T193000Z
 LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
 DTSTART:20260920T160000Z
 SUMMARY:Holy Cross at Yale
-UID:c453c535-f48f-4fbc-83b5-4376c5af7cb2@c453.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Stonehill
-DTEND:20261018T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261018T160000Z
-SUMMARY:Stonehill at Yale
-UID:d26dff51-d9c9-4528-96e4-f342cbdf52ae@d26d.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Princeton
-DTEND:20261115T203000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261115T170000Z
-SUMMARY:Princeton at Yale
-UID:f9b6b4e1-2a75-4c85-bf72-e06abcc9340f@f9b6.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: #2Montana State University
-DTEND:20261206T203000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261206T170000Z
-SUMMARY:#2Montana State University at Yale
-UID:5bacdd75-6b86-4916-8e0e-5c6ede1a14c6@5bac.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Columbia
-DTEND:20261101T203000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261101T170000Z
-SUMMARY:Columbia at Yale
-UID:12fc7fe8-60f2-4b9e-8a92-3e3e5dc90912@12fc.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: #15Youngstown State
-DTEND:20261129T203000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261129T170000Z
-SUMMARY:#15Youngstown State at Yale
-UID:097c896d-c09b-4081-84d5-6111f61f8e05@097c.org
+UID:c79e109e-509d-47ac-9981-a91f25a73aad@c79e.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Dartmouth
@@ -95,6 +23,78 @@ DTEND:20261011T193000Z
 LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
 DTSTART:20261011T160000Z
 SUMMARY:Dartmouth at Yale
-UID:6cdf2fc4-249c-47cc-b31c-0fc4e0db3368@6cdf.org
+UID:d3e5baaf-278f-4316-8c57-8df978643d41@d3e5.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Brown
+DTEND:20261108T203000Z
+LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+DTSTART:20261108T170000Z
+SUMMARY:Brown at Yale
+UID:c4674f4e-b7d5-4927-862e-75a17d236aa6@c467.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Penn
+DTEND:20261025T193000Z
+LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+DTSTART:20261025T160000Z
+SUMMARY:Penn at Yale
+UID:84d8341f-dbd1-40bc-8b13-a583aea3974f@84d8.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Cornell
+DTEND:20260927T193000Z
+LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+DTSTART:20260927T160000Z
+SUMMARY:Cornell at Yale
+UID:e644722f-925e-496f-9326-aa20e40b23b2@e644.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: #2 Montana State University
+DTEND:20261206T203000Z
+LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+DTSTART:20261206T170000Z
+SUMMARY:#2 Montana State University at Yale
+UID:10e01698-d57f-4c96-994c-21525120c898@10e0.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Lehigh
+DTEND:20261004T193000Z
+LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+DTSTART:20261004T160000Z
+SUMMARY:Lehigh at Yale
+UID:2a67f0bc-13e8-46a6-972e-8039b9b8eabe@2a67.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Columbia
+DTEND:20261101T203000Z
+LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+DTSTART:20261101T170000Z
+SUMMARY:Columbia at Yale
+UID:ad7035ce-4ef5-413e-90e3-d0bf8e6da6e1@ad70.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Stonehill
+DTEND:20261018T193000Z
+LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+DTSTART:20261018T160000Z
+SUMMARY:Stonehill at Yale
+UID:15862f39-2b12-4b60-b48d-236e1bcba59c@1586.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: #15 Youngstown State
+DTEND:20261129T203000Z
+LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+DTSTART:20261129T170000Z
+SUMMARY:#15 Youngstown State at Yale
+UID:a08bbb90-e72b-45fd-bcbd-a89314db0548@a08b.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Harvard
+DTEND:20261122T203000Z
+LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+DTSTART:20261122T170000Z
+SUMMARY:Harvard at Yale
+UID:cbaca68b-d6f6-43f1-ba04-2bf340496fdd@cbac.org
 END:VEVENT
 END:VCALENDAR

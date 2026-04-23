@@ -438,6 +438,23 @@ def detect_schedule_structure(soup):
     logger.warning("Could not detect schedule structure")
     return None, None
 
+def normalize_opponent_poll_rank(opponent: str) -> str:
+    """
+    SIDEARM often emits poll rank with no space: '#15Youngstown State'.
+    Keep the rank, normalize to '#15 Youngstown State'. Also handles 'No. 15 Name'.
+    """
+    if not opponent:
+        return opponent
+    m = re.match(r"^no\.?\s*(\d+)\s+(.+)$", opponent, re.IGNORECASE)
+    if m:
+        return f"#{m.group(1)} {m.group(2).strip()}"
+    m = re.match(r"^#(\d+)\s*(.+)$", opponent)
+    if m:
+        rest = m.group(2).strip()
+        if rest:
+            return f"#{m.group(1)} {rest}"
+    return opponent
+
 def extract_game_data(game_element):
     """Extract game data from a single game element using flexible selectors"""
     try:
@@ -503,6 +520,7 @@ def extract_game_data(game_element):
         
         # Clean opponent name
         opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent, flags=re.IGNORECASE).strip()
+        opponent = normalize_opponent_poll_rank(opponent)
         
         return {
             'date_str': date_str,
