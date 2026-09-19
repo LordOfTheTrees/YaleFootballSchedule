@@ -772,6 +772,7 @@ def scrape_yale_schedule(season=None):
                 game_elements = container.select(game_selector)
                 logger.info(f"Found {len(game_elements)} potential game elements")
                 
+                untimed_sample = None
                 for game_elem in game_elements:
                     game_data = extract_game_data(game_elem)
                     
@@ -818,6 +819,20 @@ def scrape_yale_schedule(season=None):
                     kickoff = (game_datetime.strftime('%I:%M %p').lstrip('0')
                                if game_data['time_known'] else 'kickoff TBA')
                     logger.info(f"Scraped: {title} on {game_datetime.date()} ({kickoff})")
+
+                    if not game_data['time_known'] and untimed_sample is None:
+                        untimed_sample = (title, game_elem)
+
+                # A card with no clock time anywhere is either a genuine TBA or a
+                # template change that moved the kickoff somewhere we do not read.
+                # Dump one so the next person can tell which, without a scraper run
+                # of their own.
+                if untimed_sample:
+                    sample_title, sample_elem = untimed_sample
+                    logger.warning(
+                        f"No kickoff time found in the markup for {sample_title}. "
+                        f"Sample card HTML: {str(sample_elem)[:2000]}"
+                    )
                 
                 if games:
                     logger.info(f"Successfully scraped {len(games)} games from {url}")
