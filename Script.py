@@ -9,6 +9,7 @@ import re
 import logging
 import sys
 import random
+import uuid
 from zoneinfo import ZoneInfo
 
 # Configure logging first
@@ -29,6 +30,31 @@ except ImportError:
     logger.warning("curl_cffi not available - falling back to standard requests")
 
 CALENDAR_FILE = "yale_football.ics"
+
+# Stable namespace for event UIDs. Deriving the UID from the game itself keeps
+# it constant across runs, so calendar subscribers update events in place
+# instead of seeing them deleted and recreated on every scrape.
+UID_NAMESPACE = uuid.UUID("6f9619ff-8b86-d011-b42d-00c04fc964ff")
+
+# Kickoff used when the schedule page does not publish a time yet. Games that
+# fall back to this carry time_known=False so the calendar can say so and
+# validation can tell a real noon kickoff from a parser failure.
+DEFAULT_KICKOFF_HOUR = 12
+DEFAULT_KICKOFF_MINUTE = 0
+
+HOME_LOCATION = "New Haven, Conn.\nYale Bowl, Class of 1954 Field"
+
+_MONTH_PATTERN = (
+    r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|'
+    r'Jul(?:y)?|Aug(?:ust)?|Sept?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)'
+)
+# SIDEARM renders dates as "Sep 19 (Sat)" and sometimes AP-style ("Sept. 19"),
+# so the trailing period is optional and "Sept" is accepted alongside "Sep".
+_DATE_RE = re.compile(rf'\b({_MONTH_PATTERN}\.?\s+\d{{1,2}})\b', re.I)
+_NUMERIC_DATE_RE = re.compile(r'\b(\d{1,2}/\d{1,2}(?:/\d{2,4})?)\b')
+# No trailing \b: it would not match after the period in "12:00 p.m."
+_TIME_RE = re.compile(r'\b(\d{1,2}:\d{2}\s*[AP]\.?M\.?)(?![A-Za-z])', re.I)
+_TBA_VALUES = ("", "TBA", "TBD", "TIME TBA", "TIME TBD", "TBA TBA")
 
 # Expected number of games per season for validation
 EXPECTED_GAMES_PER_SEASON = {
@@ -218,7 +244,7 @@ def parse_date_time(date_str, time_str=None, year=None):
             
         # Clean inputs
         date_str = date_str.strip() if date_str else ""
-        time_str = time_str.strip() if time_str else "12:00 PM"  # Default to 12 PM for Ivy League football
+        time_str = time_str.strip() if time_str else ""
         
         logger.debug(f"Parsing date: '{date_str}', time: '{time_str}', year: {year}")
         
@@ -297,10 +323,17 @@ def parse_date_time(date_str, time_str=None, year=None):
             # Return None to indicate parsing failure
             return None
         
-        # Parse time with better handling
-        hour, minute = 12, 0  # Default to 12:00 PM for Ivy League football
-        
-        if time_str and time_str.upper() not in ["TBA", "TBD", "", "TIME TBA"]:
+        # Parse time with better handling. A missing or TBA kickoff falls back
+        # to the default below, but says so in the log - callers track it via
+        # time_known so a defaulted time is never mistaken for a scraped one.
+        hour, minute = DEFAULT_KICKOFF_HOUR, DEFAULT_KICKOFF_MINUTE
+
+        if _is_tba(time_str):
+            logger.warning(
+                f"No kickoff time for '{date_str}' - defaulting to "
+                f"{DEFAULT_KICKOFF_HOUR:02d}:{DEFAULT_KICKOFF_MINUTE:02d} ET"
+            )
+        else:
             is_pm = "PM" in time_str.upper()
             is_am = "AM" in time_str.upper()
             
@@ -313,13 +346,13 @@ def parse_date_time(date_str, time_str=None, year=None):
                     hour = int(time_parts[0])
                     minute = int(time_parts[1]) if len(time_parts) > 1 else 0
                 except:
-                    hour, minute = 12, 0
+                    hour, minute = DEFAULT_KICKOFF_HOUR, DEFAULT_KICKOFF_MINUTE
             elif time_clean.isdigit() and len(time_clean) <= 2:
                 try:
                     hour = int(time_clean)
                     minute = 0
                 except:
-                    hour = 12
+                    hour = DEFAULT_KICKOFF_HOUR
             
             # Handle AM/PM conversion
             if is_pm and hour < 12:
@@ -358,6 +391,29 @@ def validate_schedule(games, season):
         logger.error(f"Only found {len(games)} games for season {season}, expected at least {expected_count}")
         return False
     
+    # A parser that cannot find kickoff times still yields a plausible-looking
+    # schedule - every game just lands silently on the default. Fail instead of
+    # publishing a full slate of fabricated noon kickoffs.
+    timed = [game for game in games if game.get('time_known')]
+    if not timed:
+        logger.error(
+            f"No game carries a scraped kickoff time - all {len(games)} fell back to "
+            f"{DEFAULT_KICKOFF_HOUR:02d}:{DEFAULT_KICKOFF_MINUTE:02d} ET. "
+            "The time parser is broken, not the schedule."
+        )
+        return False
+    if len(timed) < len(games):
+        pending = [game['title'] for game in games if not game.get('time_known')]
+        logger.warning(f"{len(pending)} game(s) with no published kickoff yet: {', '.join(pending)}")
+
+    # Yale plays both home and away every season, so an all-one-way slate means
+    # the venue detection failed.
+    home_count = sum(1 for game in games if game.get('is_home'))
+    if len(games) >= 4 and home_count in (0, len(games)):
+        side = 'home' if home_count else 'away'
+        logger.error(f"All {len(games)} games came back as {side} games - home/away detection is broken")
+        return False
+
     # Check for suspicious dates (all games on same date, etc.)
     dates = [game['start'].date() for game in games]
     unique_dates = len(set(dates))
@@ -455,81 +511,187 @@ def normalize_opponent_poll_rank(opponent: str) -> str:
             return f"#{m.group(1)} {rest}"
     return opponent
 
+def _first_date(text):
+    """First date in the text, in either the word ("Sep 19") or numeric form."""
+    m = _DATE_RE.search(text) or _NUMERIC_DATE_RE.search(text)
+    return m.group(1) if m else ""
+
+
+def _first_time(text):
+    """First clock time in the text, e.g. "2:00 PM"."""
+    m = _TIME_RE.search(text)
+    return m.group(1) if m else ""
+
+
+def _is_tba(value):
+    return not value or value.strip().upper().replace(".", "") in _TBA_VALUES
+
+
+def _is_yale_venue(location):
+    """True when a venue string names Yale's home field."""
+    low = (location or "").lower()
+    return "new haven" in low or "yale bowl" in low
+
+
 def extract_game_data(game_element):
-    """Extract game data from a single game element using flexible selectors"""
+    """Extract date, time, opponent, venue and home/away from a game element.
+
+    Known SIDEARM field classes are tried first, then a regex sweep over the
+    element's whole text. The sweep matters: the classic SIDEARM card keeps the
+    kickoff in a second <span> inside .sidearm-schedule-game-opponent-date, so
+    there is no time-classed element to find and a selector-only lookup always
+    comes back empty.
+    """
     try:
-        # Try multiple strategies to extract date
+        text = game_element.get_text(' ', strip=True)
+
+        # --- Date ---
         date_str = ""
         date_selectors = [
-            '.date', '.game-date', '.event-date', '.schedule-date',
             '.sidearm-schedule-game-opponent-date',
+            '.date', '.game-date', '.event-date', '.schedule-date',
             '[class*="date"]', 'time', '.datetime',
-            'td:first-child', '.first-col'
         ]
-        
         for sel in date_selectors:
             date_elem = game_element.select_one(sel)
             if date_elem:
-                date_str = date_elem.get_text(strip=True)
-                if date_str and any(char.isdigit() for char in date_str):
+                date_str = _first_date(date_elem.get_text(' ', strip=True))
+                if date_str:
                     break
-        
-        # Try multiple strategies to extract time
-        time_str = "12:00 PM"  # Better default for Ivy League football
+        if not date_str:
+            date_str = _first_date(text)
+        if not date_str:
+            logger.debug(f"No date found in game element; text: {text[:120]}")
+            return None
+
+        # --- Time ---
+        # Never overwrite a good value with an empty or TBA one: keep looking.
+        time_str = ""
         time_selectors = [
-            '.time', '.game-time', '.event-time', '.schedule-time',
             '.sidearm-schedule-game-opponent-time',
-            '[class*="time"]', '.kickoff'
+            '.time', '.game-time', '.event-time', '.schedule-time',
+            '[class*="time"]', '.kickoff',
         ]
-        
         for sel in time_selectors:
             time_elem = game_element.select_one(sel)
-            if time_elem:
-                time_str = time_elem.get_text(strip=True)
-                if time_str and time_str.upper() not in ["", "TBA", "TBD"]:
-                    break
-        
-        # Try multiple strategies to extract opponent
+            if not time_elem:
+                continue
+            candidate = time_elem.get_text(' ', strip=True)
+            if _is_tba(candidate):
+                continue
+            found = _first_time(candidate)
+            if found:
+                time_str = found
+                break
+        if not time_str:
+            time_str = _first_time(text)
+
+        # An unpublished kickoff stays empty here rather than silently becoming
+        # noon, so the caller can tell "TBA" apart from a real midday game.
+        time_known = bool(time_str)
+
+        # --- Opponent ---
         opponent = ""
         opponent_selectors = [
-            '.opponent', '.team-name', '.visitor', '.away-team', '.home-team',
             '.sidearm-schedule-game-opponent-name',
-            '[class*="opponent"]', '[class*="team"]',
-            'a[href*="team"]', 'td:nth-child(2)'
+            '[class*="opponent-name"]', '[class*="team__name"]',
+            '[class*="team-name"]', '[class*="opponent"]',
+            '.opponent', '.team-name', '.visitor', '.away-team', '.home-team',
         ]
-        
         for sel in opponent_selectors:
-            opp_elem = game_element.select_one(sel)
-            if opp_elem:
-                opponent = opp_elem.get_text(strip=True)
-                if opponent and len(opponent) > 2:
-                    break
-        
-        # If still no opponent, look in all text content
+            for opp_elem in game_element.select(sel):
+                candidate = opp_elem.get_text(' ', strip=True)
+                candidate = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', candidate, flags=re.IGNORECASE).strip()
+                candidate = normalize_opponent_poll_rank(candidate)
+                if len(candidate) < 2 or candidate.upper() in ('TBA', 'TBD', 'BYE'):
+                    continue
+                # The current template lists both teams in the row.
+                if candidate.lower() in ('yale', 'yale bulldogs', 'yale university'):
+                    continue
+                opponent = candidate
+                break
+            if opponent:
+                break
+
         if not opponent:
-            all_text = game_element.get_text()
-            # Look for patterns like "vs Team" or "at Team"
-            match = re.search(r'(?:vs\.?\s+|at\s+|@\s*)([A-Za-z\s&]+)', all_text, re.IGNORECASE)
+            match = re.search(r'(?:vs\.?\s+|at\s+|@\s*)([A-Z][A-Za-z\s&\-\'\.]{1,40})', text)
             if match:
-                opponent = match.group(1).strip()
-        
-        # Determine home/away
-        all_text = game_element.get_text().lower()
-        is_away = any(indicator in all_text for indicator in ['at ', '@ ', 'away'])
-        is_home = not is_away
-        
-        # Clean opponent name
-        opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent, flags=re.IGNORECASE).strip()
-        opponent = normalize_opponent_poll_rank(opponent)
-        
+                candidate = re.split(r'\s{2,}|\n|\d', match.group(1))[0].strip()
+                if len(candidate) >= 2:
+                    opponent = normalize_opponent_poll_rank(candidate)
+
+        if not opponent or opponent.upper() in ('TBA', 'TBD', 'BYE'):
+            logger.debug(f"No valid opponent found; text: {text[:120]}")
+            return None
+
+        # --- Venue ---
+        location = ""
+        location_selectors = [
+            '[class*="venue-text"]', '[class*="location-text"]',
+            '.sidearm-schedule-game-location', '[class*="location"]', '[class*="venue"]',
+        ]
+        for sel in location_selectors:
+            loc_elem = game_element.select_one(sel)
+            if not loc_elem:
+                continue
+            candidate = loc_elem.get_text(' ', strip=True)
+            if not _is_tba(candidate):
+                location = candidate
+                break
+
+        # --- Broadcast ---
+        broadcast = ""
+        broadcast_selectors = [
+            '[class*="tv-network"]', '[class*="tv-networks"]', '[class*="tv-link"]',
+            '[class*="broadcast"]', '[class*="network"]',
+        ]
+        for sel in broadcast_selectors:
+            tv_elem = game_element.select_one(sel)
+            if not tv_elem:
+                continue
+            candidate = re.sub(r'^\s*(TV|Watch|Live)\s*:\s*', '',
+                               tv_elem.get_text(' ', strip=True), flags=re.IGNORECASE).strip()
+            # SIDEARM parks "TBA" in the TV slot until a network is assigned.
+            if not _is_tba(candidate):
+                broadcast = candidate
+            break
+
+        # --- Home/away ---
+        # Class markers first, then the venue, which is decisive for a
+        # single-team calendar: anything not at the Yale Bowl is a road game.
+        # A bare "at " substring search is not a signal - SIDEARM writes
+        # "Worcester, Mass. / Fitton Field", with no "at" anywhere.
+        classes = ' '.join(game_element.get('class') or [])
+        for tag in game_element.select('[class]'):
+            classes += ' ' + ' '.join(tag.get('class') or [])
+        classes = classes.lower()
+
+        if 'venue--away' in classes or 'sidearm-schedule-game-away' in classes:
+            is_home = False
+        elif 'venue--home' in classes or 'sidearm-schedule-game-home' in classes:
+            is_home = True
+        elif location:
+            is_home = _is_yale_venue(location)
+        elif re.search(r'\bat\s+[A-Z]', text):
+            is_home = False
+        elif re.search(r'\bvs\.?\s', text, re.IGNORECASE):
+            is_home = True
+        elif 'away' in text.lower():
+            is_home = False
+        else:
+            is_home = True
+
         return {
             'date_str': date_str,
-            'time_str': time_str, 
+            'time_str': time_str,
+            'time_known': time_known,
             'opponent': opponent,
             'is_home': is_home,
-            'raw_text': game_element.get_text(strip=True)[:100]  # For debugging
+            'location': location,
+            'broadcast': broadcast,
+            'raw_text': text[:100],  # For debugging
         }
-        
+
     except Exception as e:
         logger.error(f"Error extracting game data: {e}")
         return None
@@ -619,14 +781,18 @@ def scrape_yale_schedule(season=None):
                     # Create game info
                     opponent = game_data['opponent']
                     is_home = game_data['is_home']
-                    
+
                     if is_home:
                         title = f"{opponent} at Yale"
-                        location = "New Haven, Conn.\nYale Bowl, Class of 1954 Field"
+                        # Prefer the scraped venue, but keep the full Yale Bowl
+                        # name when the card only says "New Haven, Conn."
+                        location = game_data['location'] or HOME_LOCATION
+                        if _is_yale_venue(location) and 'Class of 1954' not in location:
+                            location = HOME_LOCATION
                     else:
                         title = f"Yale at {opponent}"
-                        location = ""
-                    
+                        location = game_data['location']
+
                     game_datetime = parse_date_time(game_data['date_str'], game_data['time_str'], season)
                     
                     if not game_datetime:
@@ -640,15 +806,18 @@ def scrape_yale_schedule(season=None):
                         'start': game_datetime,
                         'end': game_datetime + duration,
                         'location': location,
-                        'broadcast': "",
+                        'broadcast': game_data['broadcast'],
                         'is_home': is_home,
                         'opponent': opponent,
                         'date_str': game_data['date_str'],
-                        'time_str': game_data['time_str']
+                        'time_str': game_data['time_str'],
+                        'time_known': game_data['time_known'],
                     }
                     
                     games.append(game_info)
-                    logger.info(f"Scraped: {title} on {game_datetime}")
+                    kickoff = (game_datetime.strftime('%I:%M %p').lstrip('0')
+                               if game_data['time_known'] else 'kickoff TBA')
+                    logger.info(f"Scraped: {title} on {game_datetime.date()} ({kickoff})")
                 
                 if games:
                     logger.info(f"Successfully scraped {len(games)} games from {url}")
@@ -740,11 +909,12 @@ def scrape_espn_schedule(season=None):
                             continue
                         
                         # Extract time if available
-                        time_str = "12:00 PM"  # Default
+                        time_str = ""
                         if len(cells) > 2:
                             time_cell = cells[2].get_text(strip=True)
-                            if any(char.isdigit() for char in time_cell) and ("AM" in time_cell or "PM" in time_cell):
-                                time_str = time_cell
+                            if not _is_tba(time_cell):
+                                time_str = _first_time(time_cell)
+                        time_known = bool(time_str)
                         
                         is_away = 'at ' in opponent_str.lower() or '@' in opponent_str
                         opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent_str, flags=re.IGNORECASE).strip()
@@ -773,7 +943,8 @@ def scrape_espn_schedule(season=None):
                             'is_home': not is_away,
                             'opponent': opponent,
                             'date_str': date_str,
-                            'time_str': time_str
+                            'time_str': time_str,
+                            'time_known': time_known,
                         }
                         
                         games.append(game_info)
@@ -837,14 +1008,27 @@ def create_calendar(games):
         event.begin = game['start']
         event.end = game['end']
         event.location = game['location']
-        
+
+        # Derive the UID from the matchup itself so it survives re-scrapes.
+        # Letting the ics library mint a random one on every run made each
+        # nightly commit look like ten deleted events and ten new ones, which
+        # subscribers apply by dropping their alerts and RSVPs.
+        key = f"{game['start'].year}|{game['opponent'].lower()}|{'home' if game['is_home'] else 'away'}"
+        event.uid = f"{uuid.uuid5(UID_NAMESPACE, key)}@yalefootballschedule"
+
         description = ""
         if game['broadcast']:
             description += f"Broadcast: {game['broadcast']}\n"
         description += "Home Game" if game['is_home'] else "Away Game"
         if game['opponent']:
             description += f"\nOpponent: {game['opponent']}"
-            
+        if not game.get('time_known', True):
+            description += (
+                f"\nKickoff time not yet announced - placeholder "
+                f"{DEFAULT_KICKOFF_HOUR % 12 or 12}:{DEFAULT_KICKOFF_MINUTE:02d} "
+                f"{'PM' if DEFAULT_KICKOFF_HOUR >= 12 else 'AM'} ET"
+            )
+
         event.description = description
         cal.events.add(event)
     

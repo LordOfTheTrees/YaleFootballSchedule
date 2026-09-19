@@ -30,6 +30,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 ics flask apscheduler python-dateutil curl-cffi
           
+      - name: Run parser tests
+        run: python test_parsers.py
+
       - name: Create update script
         run: |
           cat > update_calendar.py << 'EOF'
@@ -110,7 +113,8 @@ jobs:
               print(f"Games found: {len(games)}")
               print("Games:")
               for game in games:
-                  print(f"  - {game['title']} ({game['start'].strftime('%m/%d/%Y %I:%M %p')})")
+                  pending = "" if game.get('time_known', True) else " [kickoff TBA - placeholder time]"
+                  print(f"  - {game['title']} ({game['start'].strftime('%m/%d/%Y %I:%M %p')}){pending}")
               print("==============================================\\n")
               
               # Verify the calendar file was created and has content
