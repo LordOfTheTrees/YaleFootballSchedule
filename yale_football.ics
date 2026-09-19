@@ -4,80 +4,81 @@ PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Brown
 DTEND:20261107T203000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+LOCATION:New Haven\, Conn. Yale Bowl\, Class of 1954 Field
 DTSTART:20261107T170000Z
 SUMMARY:Brown at Yale
-UID:ab4e3b80-0b89-453e-a1b2-858b1561ecbb@ab4e.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Holy Cross
-DTEND:20260919T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20260919T160000Z
-SUMMARY:Holy Cross at Yale
-UID:1d849fcf-c8ae-4a9b-8aa2-568530953ad5@1d84.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Dartmouth
-DTEND:20261010T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261010T160000Z
-SUMMARY:Dartmouth at Yale
-UID:02f1b8a3-9db7-41e6-a159-2c0b1bf6fb4c@02f1.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Columbia
-DTEND:20261031T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261031T160000Z
-SUMMARY:Columbia at Yale
-UID:7534d52d-fa7d-431f-bb89-422a08332e5a@7534.org
+UID:670ccdb8-8cab-5dfd-b9b0-1adbff0d26f4@yalefootballschedule
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Princeton
 DTEND:20261114T203000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+LOCATION:New Haven\, Conn. Yale Bowl\, Class of 1954 Field
 DTSTART:20261114T170000Z
 SUMMARY:Princeton at Yale
-UID:5b84cbdd-35b8-4a88-9543-96c740c46533@5b84.org
+UID:15cf6572-1be7-5fcf-b031-732c98ae8941@yalefootballschedule
 END:VEVENT
 BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Pennsylvania
-DTEND:20261023T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20261023T160000Z
-SUMMARY:Pennsylvania at Yale
-UID:9dc11848-e129-480f-b6eb-5236c620e642@9dc1.org
+DESCRIPTION:Away Game\nOpponent: Holy Cross
+DTEND:20260919T213000Z
+LOCATION:Worcester\, Mass.
+DTSTART:20260919T180000Z
+SUMMARY:Yale at Holy Cross
+UID:e9d2491b-a698-5ee1-82df-0c906cee4614@yalefootballschedule
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game\nOpponent: Columbia
+DTEND:20261031T193000Z
+LOCATION:New York\, N.Y.
+DTSTART:20261031T160000Z
+SUMMARY:Yale at Columbia
+UID:4b793fd9-121f-5f57-9076-be02bf15711e@yalefootballschedule
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Dartmouth
+DTEND:20261010T193000Z
+LOCATION:New Haven\, Conn. Yale Bowl\, Class of 1954 Field
+DTSTART:20261010T160000Z
+SUMMARY:Dartmouth at Yale
+UID:101b97df-da0f-55b9-9ee7-1bc1ef77481b@yalefootballschedule
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Merrimack
 DTEND:20261003T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+LOCATION:New Haven\, Conn. Yale Bowl\, Class of 1954 Field
 DTSTART:20261003T160000Z
 SUMMARY:Merrimack at Yale
-UID:76867dc0-6e2b-4922-a2fe-e851f9344fa2@7686.org
+UID:cf0096fc-c4cb-5763-97f6-b53c81ea4baf@yalefootballschedule
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game\nOpponent: Cornell
+DTEND:20260926T203000Z
+LOCATION:Ithaca\, N.Y.
+DTSTART:20260926T170000Z
+SUMMARY:Yale at Cornell
+UID:00b7674b-a93c-57d8-b8fc-e93354c743c1@yalefootballschedule
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game\nOpponent: Pennsylvania
+DTEND:20261024T023000Z
+LOCATION:Philadelphia\, Pa.
+DTSTART:20261023T230000Z
+SUMMARY:Yale at Pennsylvania
+UID:2f7bcbf1-27cf-529b-a54c-91378334c55c@yalefootballschedule
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Away Game\nOpponent: Harvard
-DTEND:20261121T203000Z
-DTSTART:20261121T170000Z
+DTEND:20261122T000000Z
+LOCATION:Boston\, Mass.
+DTSTART:20261121T203000Z
 SUMMARY:Yale at Harvard
-UID:0e718e4b-895a-4493-9dab-155bf5acccde@0e71.org
+UID:07d13027-aa52-5398-83b6-cef6e97bd720@yalefootballschedule
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Rhode Island
 DTEND:20261017T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
+LOCATION:New Haven\, Conn. Yale Bowl\, Class of 1954 Field
 DTSTART:20261017T160000Z
 SUMMARY:Rhode Island at Yale
-UID:e0dd60c7-6b04-482a-94bd-f761d0ab108c@e0dd.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Cornell
-DTEND:20260926T193000Z
-LOCATION:New Haven\, Conn.\nYale Bowl\, Class of 1954 Field
-DTSTART:20260926T160000Z
-SUMMARY:Cornell at Yale
-UID:be6498c8-7952-4c06-8ac5-10ce9d2f2918@be64.org
+UID:93accc56-e169-5669-899e-4141c121aa24@yalefootballschedule
 END:VEVENT
 END:VCALENDAR
