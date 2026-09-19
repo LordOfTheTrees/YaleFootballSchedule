@@ -20,7 +20,7 @@ from bs4 import BeautifulSoup
 
 import Script
 from Script import (
-    _TIME_RE,
+    _first_time,
     create_calendar,
     detect_schedule_structure,
     extract_game_data,
@@ -33,16 +33,16 @@ logging.disable(logging.CRITICAL)
 # (date text, time text, opponent, venue text) - the real 2026 slate, with the
 # kickoffs Yale had published and TBA for the rest.
 _FIXTURE_GAMES = [
-    ("Sep 19 (Sat)", "2:00 PM", "Holy Cross", "Worcester, Mass. / Fitton Field"),
+    ("Sep 19 (Sat)", "2 p.m.", "Holy Cross", "Worcester, Mass. / Fitton Field"),
     ("Sep 26 (Sat)", "", "Cornell", "Ithaca, N.Y. / Schoellkopf Field"),
-    ("Oct 3 (Sat)", "12:00 PM", "Merrimack", "New Haven, Conn. / Yale Bowl"),
+    ("Oct 3 (Sat)", "Noon", "Merrimack", "New Haven, Conn. / Yale Bowl"),
     ("Oct 10 (Sat)", "", "Dartmouth", "New Haven, Conn. / Yale Bowl"),
-    ("Oct 17 (Sat)", "12:00 PM", "Rhode Island", "New Haven, Conn. / Yale Bowl"),
-    ("Oct 23 (Fri)", "7:00 PM", "Pennsylvania", "Philadelphia, Pa. / Franklin Field"),
+    ("Oct 17 (Sat)", "Noon", "Rhode Island", "New Haven, Conn. / Yale Bowl"),
+    ("Oct 23 (Fri)", "7 p.m.", "Pennsylvania", "Philadelphia, Pa. / Franklin Field"),
     ("Oct 31 (Sat)", "", "Columbia", "New York, N.Y. / Robert K. Kraft Field"),
     ("Nov 7 (Sat)", "", "Brown", "New Haven, Conn. / Yale Bowl"),
     ("Nov 14 (Sat)", "", "Princeton", "New Haven, Conn. / Yale Bowl"),
-    ("Nov 21 (Sat)", "", "Harvard", "Boston, Mass. / Fenway Park"),
+    ("Nov 21 (Sat)", "3:30 p.m.", "Harvard", "Boston, Mass. / Fenway Park"),
 ]
 
 _HOME_VENUE = "New Haven, Conn. / Yale Bowl"
@@ -120,12 +120,16 @@ def test_time_regex() -> bool:
     for text, expected in [
         ("2:00 PM", "2:00 PM"),
         ("Sep 19 (Sat)2:00 PM", "2:00 PM"),
-        ("12:00 p.m.", "12:00 p.m."),
-        ("7:00PM", "7:00PM"),
+        ("12:00 p.m.", "12:00 PM"),
+        ("7:00PM", "7:00 PM"),
+        # SIDEARM's own renderings - the ones the old H:MM-only regex missed
+        ("Sep 19 (Sat) 2 p.m.", "2:00 PM"),
+        ("Oct 23 (Fri) 7 p.m.", "7:00 PM"),
+        ("Oct 3 (Sat) Noon", "12:00 PM"),
+        ("Nov 21 (Sat) 3:30 p.m.", "3:30 PM"),
     ]:
-        match = _TIME_RE.search(text)
-        ok &= check(f"{text!r}", bool(match) and match.group(1) == expected,
-                    f"got {match.group(1) if match else None!r}")
+        got = _first_time(text)
+        ok &= check(f"{text!r}", got == expected, f"got {got!r}")
     return ok
 
 
@@ -135,7 +139,7 @@ def test_kickoff_shares_the_date_node() -> bool:
     card = """
     <li class="sidearm-schedule-game">
       <div class="sidearm-schedule-game-opponent-date">
-        <span>Sep 19 (Sat)</span><span>2:00 PM</span>
+        <span>Sep 19 (Sat)</span><span>2 p.m.</span>
       </div>
       <div class="sidearm-schedule-game-opponent-name">Holy Cross</div>
       <div class="sidearm-schedule-game-opponent-location">Worcester, Mass. / Fitton Field</div>
@@ -157,7 +161,7 @@ def test_empty_element_does_not_clobber() -> bool:
     print("An empty time element does not discard a time found elsewhere:")
     card = """
     <li class="sidearm-schedule-game">
-      <div class="sidearm-schedule-game-opponent-date"><span>Oct 23 (Fri)</span><span>7:00 PM</span></div>
+      <div class="sidearm-schedule-game-opponent-date"><span>Oct 23 (Fri)</span><span>7 p.m.</span></div>
       <div class="game-time"></div>
       <div class="sidearm-schedule-game-opponent-name">Pennsylvania</div>
       <div class="sidearm-schedule-game-opponent-location">Philadelphia, Pa. / Franklin Field</div>
@@ -211,6 +215,12 @@ def test_sidearm_fixture() -> bool:
                 str(by_opponent["Pennsylvania"]["start"]))
     ok &= check("Penn broadcast kept", by_opponent["Pennsylvania"]["broadcast"] == "ESPNU",
                 by_opponent["Pennsylvania"]["broadcast"])
+    ok &= check("\"Noon\" is read as 12:00 PM, not dropped",
+                by_opponent["Merrimack"]["time_known"] and by_opponent["Merrimack"]["start"].hour == 12,
+                str(by_opponent["Merrimack"]["start"]))
+    ok &= check("Harvard 3:30 p.m. kept",
+                by_opponent["Harvard"]["start"].hour == 15 and by_opponent["Harvard"]["start"].minute == 30,
+                str(by_opponent["Harvard"]["start"]))
     ok &= check("TBA is not stored as a broadcaster",
                 all(g["broadcast"].upper() != "TBA" for g in games))
 
@@ -227,7 +237,7 @@ def test_sidearm_fixture() -> bool:
                 by_opponent["Harvard"]["location"])
 
     timed = [g for g in games if g["time_known"]]
-    ok &= check("4 published kickoffs, 6 TBA", len(timed) == 4, f"{len(timed)} timed")
+    ok &= check("5 published kickoffs, 5 TBA", len(timed) == 5, f"{len(timed)} timed")
     ok &= check("DST handled across the season",
                 by_opponent["Holy Cross"]["start"].utcoffset().total_seconds() == -4 * 3600
                 and by_opponent["Harvard"]["start"].utcoffset().total_seconds() == -5 * 3600)

@@ -52,8 +52,11 @@ _MONTH_PATTERN = (
 # so the trailing period is optional and "Sept" is accepted alongside "Sep".
 _DATE_RE = re.compile(rf'\b({_MONTH_PATTERN}\.?\s+\d{{1,2}})\b', re.I)
 _NUMERIC_DATE_RE = re.compile(r'\b(\d{1,2}/\d{1,2}(?:/\d{2,4})?)\b')
-# No trailing \b: it would not match after the period in "12:00 p.m."
-_TIME_RE = re.compile(r'\b(\d{1,2}:\d{2}\s*[AP]\.?M\.?)(?![A-Za-z])', re.I)
+# SIDEARM drops the minutes on whole hours ("2 p.m.") and spells out midday
+# ("Noon"), so requiring H:MM finds a time only on the :30 kickoffs. The
+# trailing \b is gone too: it would not match after the period in "p.m."
+_TIME_RE = re.compile(
+    r'\b(\d{1,2}(?::\d{2})?\s*[AP]\.?\s?M\.?|noon|midnight)(?![A-Za-z])', re.I)
 _TBA_VALUES = ("", "TBA", "TBD", "TIME TBA", "TIME TBD", "TBA TBA")
 
 # Expected number of games per season for validation
@@ -244,7 +247,7 @@ def parse_date_time(date_str, time_str=None, year=None):
             
         # Clean inputs
         date_str = date_str.strip() if date_str else ""
-        time_str = time_str.strip() if time_str else ""
+        time_str = _normalize_time_text(time_str) if time_str else ""
         
         logger.debug(f"Parsing date: '{date_str}', time: '{time_str}', year: {year}")
         
@@ -517,10 +520,29 @@ def _first_date(text):
     return m.group(1) if m else ""
 
 
+def _normalize_time_text(value):
+    """Normalize what a schedule page prints into "H:MM AM/PM".
+
+    "2 p.m." -> "2:00 PM", "Noon" -> "12:00 PM", "3:30 p.m." -> "3:30 PM".
+    """
+    if not value:
+        return ""
+    text = value.strip().lower()
+    if text.startswith('noon'):
+        return "12:00 PM"
+    if text.startswith('midnight'):
+        return "12:00 AM"
+    m = re.match(r'^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\.?$', text)
+    if not m:
+        return value.strip()
+    meridiem = 'AM' if m.group(3) == 'a' else 'PM'
+    return f"{int(m.group(1))}:{m.group(2) or '00'} {meridiem}"
+
+
 def _first_time(text):
-    """First clock time in the text, e.g. "2:00 PM"."""
+    """First clock time in the text, normalized, e.g. "2:00 PM"."""
     m = _TIME_RE.search(text)
-    return m.group(1) if m else ""
+    return _normalize_time_text(m.group(1)) if m else ""
 
 
 def _is_tba(value):
