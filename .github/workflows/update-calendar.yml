@@ -1,5 +1,7 @@
 name: Update Yale Football Calendar
 
+# Keepalive touch: 2026-11-13 (prevents GitHub from disabling the schedule after 60 days of inactivity)
+
 on:
   schedule:
     # Run at 2am ET (6am UTC)
